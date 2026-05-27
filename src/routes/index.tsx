@@ -19,16 +19,26 @@ type Product = {
 };
 
 const CATALOG: Product[] = [
+  { code: "ant-yagi", name: "Antena Yagi exterior 18dBi", price: 38900 },
+  { code: "bnd-velcro", name: "Bridas velcro x 10", price: 2900 },
   { code: "utp5-020", name: "Cable UTP Cat5e x 20m", price: 8500 },
   { code: "utp6-050", name: "Cable UTP Cat6 x 50m", price: 24900 },
+  { code: "cnv-sfp", name: "Conversor SFP a RJ45", price: 27500 },
   { code: "con-rj45", name: "Conector RJ45 (10u)", price: 3200 },
-  { code: "switch-8", name: "Switch 8 puertos Gigabit", price: 45900 },
-  { code: "router-ax", name: "Router WiFi 6 AX1800", price: 119000 },
+  { code: "fnt-poe", name: "Fuente PoE 48V 1.5A", price: 15900 },
+  { code: "jck-keystone", name: "Jack keystone Cat6", price: 1800 },
+  { code: "mod-fibra", name: "Módulo fibra LC multimodo", price: 32000 },
+  { code: "ord-cables", name: "Organizador de cables 1U", price: 9900 },
   { code: "patch-1m", name: "Patch cord 1m Cat6", price: 2500 },
   { code: "patch-3m", name: "Patch cord 3m Cat6", price: 4200 },
+  { code: "patch-pnl", name: "Patch panel 24 puertos", price: 42000 },
   { code: "crimp-rj", name: "Pinza crimpadora RJ45", price: 18500 },
-  { code: "tester-rj", name: "Tester de red RJ45", price: 22000 },
   { code: "rack-9u", name: "Rack 9U pared", price: 165000 },
+  { code: "router-ax", name: "Router WiFi 6 AX1800", price: 119000 },
+  { code: "switch-8", name: "Switch 8 puertos Gigabit", price: 45900 },
+  { code: "switch-24", name: "Switch 24 puertos PoE", price: 189000 },
+  { code: "tester-rj", name: "Tester de red RJ45", price: 22000 },
+  { code: "ups-650", name: "UPS 650VA línea interactiva", price: 79900 },
 ];
 
 type CartItem = Product & { qty: number };
@@ -93,6 +103,12 @@ function POS() {
   const removeItem = (code: string) => setCart((prev) => prev.filter((i) => i.code !== code));
 
   const total = useMemo(() => cart.reduce((s, i) => s + i.qty * i.price, 0), [cart]);
+  const sortedCatalog = useMemo(() => [...CATALOG].sort((a, b) => a.name.localeCompare(b.name, "es")), []);
+  const filtered = useMemo(() => {
+    const q = scan.trim().toLowerCase();
+    if (!q) return [];
+    return sortedCatalog.filter((p) => p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q));
+  }, [scan, sortedCatalog]);
   const itemCount = useMemo(() => cart.reduce((s, i) => s + i.qty, 0), [cart]);
 
   const handlePay = (method: string) => {
@@ -211,12 +227,19 @@ function POS() {
           </div>
         </section>
 
-        {/* Scan + quick grid */}
+        {/* Scan + price list */}
         <aside className="flex flex-col min-h-0 bg-charcoal/40">
-          <div className="p-5 border-b border-border">
+          <div className="p-5 border-b border-border relative">
             <label className="text-[11px] uppercase tracking-widest text-silver font-bold">Escaneo</label>
             <form
-              onSubmit={(e) => { e.preventDefault(); addByCode(scan); }}
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (filtered.length > 0 && scan.trim() && !CATALOG.find(p => p.code === scan.trim().toLowerCase())) {
+                  addByCode(filtered[0].code);
+                } else {
+                  addByCode(scan);
+                }
+              }}
               className="mt-2 relative"
             >
               <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 size-5 text-primary" />
@@ -224,34 +247,48 @@ function POS() {
                 ref={scanRef}
                 value={scan}
                 onChange={(e) => setScan(e.target.value)}
-                onBlur={focusScan}
+                onBlur={() => setTimeout(focusScan, 0)}
                 placeholder="Scan Barcode or Type Code [F2]"
                 className="w-full h-14 pl-11 pr-4 rounded-lg bg-midnight border-2 border-primary text-silver-light placeholder:text-silver/50 text-base font-semibold tracking-wide outline-none focus:ring-2 focus:ring-primary/40 shadow-[0_0_0_3px_hsl(24_95%_53%/0.08)]"
                 autoComplete="off"
                 autoFocus
               />
             </form>
-            <p className="mt-2 text-[11px] text-silver">Presiona <kbd className="px-1.5 py-0.5 rounded bg-midnight border border-border text-silver-light">Enter</kbd> para agregar</p>
+            <p className="mt-2 text-[11px] text-silver">Presiona <kbd className="px-1.5 py-0.5 rounded bg-midnight border border-border text-silver-light">Enter</kbd> para agregar el primer resultado</p>
+
+            {scan.trim() && filtered.length > 0 && (
+              <div className="absolute left-5 right-5 top-[105px] z-30 mt-1 rounded-lg bg-midnight border border-primary/60 shadow-2xl max-h-72 overflow-auto">
+                {filtered.slice(0, 8).map((p) => (
+                  <button
+                    key={p.code}
+                    onMouseDown={(e) => { e.preventDefault(); addByCode(p.code); }}
+                    className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-charcoal border-b border-border/40 last:border-0"
+                  >
+                    <span className="text-[10px] uppercase tracking-wider text-primary font-bold w-20 shrink-0">{p.code}</span>
+                    <span className="flex-1 text-xs text-silver-light truncate">{p.name}</span>
+                    <span className="text-xs text-silver tabular-nums">{formatCLP(p.price)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
-          <div className="p-5 flex-1 overflow-auto">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-[11px] uppercase tracking-widest text-silver font-bold">Productos rápidos</h3>
-              <span className="text-[11px] text-silver">{CATALOG.length} ítems</span>
+          <div className="flex flex-col flex-1 min-h-0">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-charcoal/60">
+              <h3 className="text-[11px] uppercase tracking-widest text-silver font-bold">Lista de precios</h3>
+              <span className="text-[11px] text-silver">{sortedCatalog.length} ítems · A–Z</span>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {CATALOG.map((p) => (
+            <div className="flex-1 overflow-auto divide-y divide-border/40">
+              {sortedCatalog.map((p) => (
                 <button
                   key={p.code}
                   onClick={() => addByCode(p.code)}
-                  className="group text-left p-3 rounded-md bg-midnight border border-border hover:border-primary hover:bg-charcoal transition-colors"
+                  className="group w-full grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-5 py-2.5 text-left hover:bg-charcoal transition-colors"
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] uppercase tracking-wider text-primary font-bold">{p.code}</span>
-                    <Plus className="size-3.5 text-silver group-hover:text-primary" />
-                  </div>
-                  <div className="mt-1 text-xs text-silver-light leading-snug line-clamp-2">{p.name}</div>
-                  <div className="mt-2 text-sm font-semibold text-silver-light tabular-nums">{formatCLP(p.price)}</div>
+                  <span className="text-[10px] uppercase tracking-wider text-primary font-bold w-20">{p.code}</span>
+                  <span className="text-xs text-silver-light truncate">{p.name}</span>
+                  <span className="text-xs font-semibold text-silver-light tabular-nums">{formatCLP(p.price)}</span>
+                  <Plus className="size-3.5 text-silver/40 group-hover:text-primary" />
                 </button>
               ))}
             </div>
