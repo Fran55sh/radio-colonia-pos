@@ -103,6 +103,12 @@ function POS() {
   const removeItem = (code: string) => setCart((prev) => prev.filter((i) => i.code !== code));
 
   const total = useMemo(() => cart.reduce((s, i) => s + i.qty * i.price, 0), [cart]);
+  const sortedCatalog = useMemo(() => [...CATALOG].sort((a, b) => a.name.localeCompare(b.name, "es")), []);
+  const filtered = useMemo(() => {
+    const q = scan.trim().toLowerCase();
+    if (!q) return [];
+    return sortedCatalog.filter((p) => p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q));
+  }, [scan, sortedCatalog]);
   const itemCount = useMemo(() => cart.reduce((s, i) => s + i.qty, 0), [cart]);
 
   const handlePay = (method: string) => {
