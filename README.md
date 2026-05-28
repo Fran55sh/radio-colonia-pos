@@ -63,14 +63,16 @@ docker compose up --build
 
 ## Producción / Coolify
 
-Usá **[`docker-compose.coolify.yml`](docker-compose.coolify.yml)** (sin Postgres propio; misma DB que el ecommerce).
+Usá **[`docker-compose.yaml`](docker-compose.yaml)** (sin Postgres propio; misma DB que el ecommerce).
+
+En Coolify: **Docker Compose Location** = `/docker-compose.yaml` (no `docker-compose.coolify.yml`).
 
 Guía completa: **[docs/DEPLOY.md](docs/DEPLOY.md)**
 
 Resumen:
 
 1. Migraciones ecommerce aplicadas (incl. `0005_pos_operational_tables.sql`).
-2. En Coolify, compose path: `docker-compose.coolify.yml`.
+2. En Coolify: Base Directory `/` y Compose Location `/docker-compose.yaml`.
 3. Variables `DB_*` del recurso Database del ecommerce.
 4. Dominio en servicio **`frontend`** (puerto interno `4173`).
 5. `CORS_ORIGIN` = URL pública del POS.

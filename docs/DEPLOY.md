@@ -13,14 +13,34 @@ Aplicá las migraciones del ecommerce **antes** del primer deploy del POS (recur
 
 ## Coolify (recomendado)
 
-### Archivo Compose
+### Archivo Compose y campos en Coolify
 
-Usá **`docker-compose.coolify.yml`** en la raíz del repo `radio-colonia-pos`.
+Usá **`docker-compose.yaml`** en la raíz del repo `radio-colonia-pos`.
 
-- **No** uses solo `docker-compose.yml` (incluye Postgres local y frontend en modo dev).
-- **No** uses solo `docker-compose.prod.yml` (solo override del frontend; no es un stack completo).
+En la UI de Coolify (Build Pack → Docker Compose):
 
-En Coolify → recurso Docker Compose → ruta del compose: `docker-compose.coolify.yml`.
+| Campo | Valor correcto |
+|-------|----------------|
+| **Base Directory** | `/` (raíz del repo; vacío si tu repo es solo `radio-colonia-pos`) |
+| **Docker Compose Location** | `/docker-compose.yaml` |
+
+Formato válido: empieza con `/`, solo letras, números, guiones y barras. Ejemplos válidos: `/docker-compose.yaml`, `/docker-compose.yml`.
+
+**No uses** (suelen dar error *format is invalid* o no encontrar el archivo):
+
+- `docker-compose.coolify.yml` (nombre con punto extra; la UI no lo acepta)
+- Rutas de Windows (`G:\...`, `C:\...`)
+- Rutas sin barra inicial (`docker-compose.yaml` sin `/` al principio, según versión de Coolify)
+
+- **No** uses `docker-compose.yml` para Coolify (ese es el stack de **desarrollo** con Postgres local).
+- **No** uses solo `docker-compose.prod.yml` (solo override del frontend).
+
+Si el monorepo tiene la carpeta `radio-colonia-pos` dentro de otro repo:
+
+| Campo | Valor |
+|-------|--------|
+| Base Directory | `/radio-colonia-pos` |
+| Docker Compose Location | `/docker-compose.yaml` |
 
 ### Postgres
 
