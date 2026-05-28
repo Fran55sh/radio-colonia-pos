@@ -1,0 +1,63 @@
+# Stack unificado: misma base que el ecommerce (radiocolonia_db).
+# En producción, apuntá DATABASE_URL o DB_* a la instancia Postgres del ecommerce.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: radio-colonia-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: radiocolonia
+      POSTGRES_PASSWORD: radiocolonia_secret
+      POSTGRES_DB: radiocolonia_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U radiocolonia -d radiocolonia_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: radio-colonia-backend
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: radiocolonia
+      DB_PASSWORD: radiocolonia_secret
+      DB_NAME: radiocolonia_db
+      NODE_ENV: development
+      PORT: 3001
+      HOST: 0.0.0.0
+      CORS_ORIGIN: http://localhost:5173,http://localhost:8080
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: radio-colonia-frontend
+    restart: unless-stopped
+    environment:
+      VITE_PROXY_TARGET: http://backend:3001
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ./Frontend/src:/app/src
+
+volumes:
+  postgres_data:

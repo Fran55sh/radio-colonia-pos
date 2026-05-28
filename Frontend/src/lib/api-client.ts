@@ -1,0 +1,88 @@
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api/v1";
+
+export type ProductoCaja = {
+  codigo_interno: string;
+  nombre: string;
+  precio_venta: number;
+  stock: number;
+  alicuota_iva: number;
+};
+
+export type SaleLine = {
+  codigo_interno: string;
+  cantidad: number;
+};
+
+export type CreateSalePayload = {
+  client_sale_id?: string;
+  medio_pago: string;
+  lineas: SaleLine[];
+  sincronizada_offline?: boolean;
+};
+
+export type CreateSaleResult = {
+  venta_id: number;
+  total: number;
+  client_sale_id?: string;
+};
+
+export type OfflineBatchResult = {
+  procesadas: number;
+  duplicadas: number;
+  errores: Array<{ client_sale_id: string; error: string }>;
+  resultados: Array<{ client_sale_id: string; venta_id: number; total: number }>;
+};
+
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...init?.headers,
+    },
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const message =
+      (data as { message?: string }).message ??
+      (data as { error?: string }).error ??
+      `Error HTTP ${res.status}`;
+    throw new Error(message);
+  }
+
+  return data as T;
+}
+
+export async function fetchProductos(): Promise<ProductoCaja[]> {
+  const data = await apiFetch<{ productos: ProductoCaja[] }>("/pos/productos");
+  return data.productos;
+}
+
+export async function createVenta(payload: CreateSalePayload): Promise<CreateSaleResult> {
+  return apiFetch<CreateSaleResult>("/pos/ventas", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function syncOfflineVentas(
+  ventas: CreateSalePayload[],
+): Promise<OfflineBatchResult> {
+  return apiFetch<OfflineBatchResult>("/pos/ventas/offline-batch", {
+    method: "POST",
+    body: JSON.stringify({ ventas }),
+  });
+}
+
+export async function checkApiHealth(): Promise<boolean> {
+  try {
+    const base = API_BASE.replace(/\/api\/v1\/?$/, "");
+    const res = await fetch(`${base}/health`);
+    const data = (await res.json()) as { status?: string };
+    return res.ok && data.status === "ok";
+  } catch {
+    return false;
+  }
+}

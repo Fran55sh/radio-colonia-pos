@@ -1,0 +1,2 @@
+-- DEPRECADO: usar schema.pos.sql vía npm run db:migrate.
+-- El catálogo (products, product_variants, suppliers) lo administra el ecommerce.

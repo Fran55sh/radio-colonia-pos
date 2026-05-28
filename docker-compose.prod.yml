@@ -1,0 +1,17 @@
+# Producción: frontend compilado + vite preview en :8080 (sin hot reload)
+# Uso: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+
+services:
+  frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+      target: production
+    container_name: radio-colonia-frontend
+    environment:
+      VITE_PROXY_TARGET: http://backend:3001
+    ports:
+      - "8080:4173"
+    volumes: []
+    depends_on:
+      - backend
