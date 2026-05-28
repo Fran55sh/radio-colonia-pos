@@ -1,0 +1,100 @@
+# Deploy POS (Docker / Coolify)
+
+## Requisito previo
+
+El POS usa la **misma PostgreSQL** que el ecommerce (`radiocolonia_db`). En esa base deben existir:
+
+- Schema ecommerce (`products`, `product_variants`, `suppliers`, …)
+- Tablas POS (`pos_ventas`, `pos_lineas_venta`, …) vía migración `0005_pos_operational_tables.sql` del repo **Radio Colonia/app**
+
+Aplicá las migraciones del ecommerce **antes** del primer deploy del POS (recurso `migrator` o `migrate.sh` en Coolify).
+
+---
+
+## Coolify (recomendado)
+
+### Archivo Compose
+
+Usá **`docker-compose.coolify.yml`** en la raíz del repo `radio-colonia-pos`.
+
+- **No** uses solo `docker-compose.yml` (incluye Postgres local y frontend en modo dev).
+- **No** uses solo `docker-compose.prod.yml` (solo override del frontend; no es un stack completo).
+
+En Coolify → recurso Docker Compose → ruta del compose: `docker-compose.coolify.yml`.
+
+### Postgres
+
+**No** levantes el servicio `postgres` del compose de desarrollo. Creá o reutilizá el recurso **Database** del ecommerce y copiá las variables de conexión al stack del POS.
+
+| Variable     | Ejemplo                          |
+|--------------|----------------------------------|
+| `DB_HOST`    | Hostname interno Coolify del Postgres del ecommerce |
+| `DB_USER`    | `radiocolonia`                   |
+| `DB_PASSWORD`| (secreto del recurso Database)   |
+| `DB_NAME`    | `radiocolonia_db`                |
+| `DB_PORT`    | `5432`                           |
+
+### Variables del stack POS
+
+| Variable        | Obligatoria | Descripción |
+|-----------------|-------------|-------------|
+| `DB_HOST`       | Sí          | Postgres ecommerce |
+| `DB_USER`       | Sí          | |
+| `DB_PASSWORD`   | Sí          | |
+| `DB_NAME`       | Sí          | `radiocolonia_db` |
+| `CORS_ORIGIN`   | Sí          | URL pública del frontend POS (ej. `https://pos.tudominio.com`) |
+| `API_TOKEN`     | No          | Bearer para proteger POST/PATCH en producción |
+| `VITE_API_URL`  | No          | Default `/api/v1` (mismo dominio que el UI vía proxy). Si API y UI están en dominios distintos: `https://api-pos.tudominio.com/api/v1` |
+
+`POS_SEED_DEMO` queda en `false` en el compose (sin catálogo dummy).
+
+### Dominios en Coolify
+
+Asigná dominios en la UI (formato con puerto interno, según docs de Coolify):
+
+| Servicio   | Puerto interno | Uso |
+|------------|----------------|-----|
+| `frontend` | `4173`         | **Pantalla de caja** — dominio principal del POS |
+| `backend`  | `3001`         | Opcional (API directa). Si solo usás el UI, el proxy `/api` del frontend llega al backend por red Docker |
+
+Ejemplo UI: `https://pos.radiocolonia.com.ar:4173`
+
+`CORS_ORIGIN` debe incluir la URL pública del frontend (sin path).
+
+### Arranque
+
+El backend ejecuta al iniciar:
+
+1. `schema.pos.sql` (tablas `pos_*`, idempotente)
+2. Sin seed de catálogo en producción
+3. API en puerto `3001`
+
+### Healthchecks
+
+- API: `GET /health`
+- UI: `GET /` en puerto `4173`
+
+### Checklist
+
+- [ ] Migraciones ecommerce aplicadas (incl. `0005`)
+- [ ] Compose: `docker-compose.coolify.yml`
+- [ ] `DB_*` apuntan al Postgres del ecommerce
+- [ ] Dominio en servicio `frontend`
+- [ ] `CORS_ORIGIN` = URL del frontend
+- [ ] `POS_SEED_DEMO` no activado en producción
+
+---
+
+## Local (desarrollo)
+
+```bash
+docker compose up --build
+```
+
+## Local (producción simulada)
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+Incluye Postgres local; no usar para producción real.
