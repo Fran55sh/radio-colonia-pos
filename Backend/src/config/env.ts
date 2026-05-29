@@ -15,10 +15,22 @@ function buildDatabaseUrlFromParts(): string | undefined {
 }
 
 function resolveDatabaseUrl(): string {
-  const direct = process.env.DATABASE_URL?.trim();
-  if (direct) return direct;
   const built = buildDatabaseUrlFromParts();
-  if (built) return built;
+  const direct = process.env.DATABASE_URL?.trim();
+
+  // Coolify a veces inyecta DATABASE_URL de otro Postgres; DB_* debe ganar.
+  if (built) {
+    if (direct && direct !== built) {
+      console.warn(
+        `[POS] DATABASE_URL y DB_* no coinciden. Usando DB_NAME=${process.env.DB_NAME}. ` +
+          "Eliminá DATABASE_URL del stack POS en Coolify si apunta a otra base.",
+      );
+    }
+    return built;
+  }
+
+  if (direct) return direct;
+
   throw new Error(
     "Configurá DATABASE_URL o DB_HOST, DB_USER, DB_PASSWORD, DB_NAME (y opcionalmente DB_PORT).",
   );

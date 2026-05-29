@@ -63,6 +63,10 @@ Si el monorepo tiene la carpeta `radio-colonia-pos` dentro de otro repo:
 | `DB_PASSWORD`   | Sí          | |
 | `DB_NAME`       | Sí          | `radiocolonia_db` |
 | `CORS_ORIGIN`   | Sí          | URL pública del frontend POS (ej. `https://pos.tudominio.com`) |
+
+**Importante:** no agregues `DATABASE_URL` al stack POS salvo que sea **idéntica** a `DB_*` (mismo host y `radiocolonia_db`). Si Coolify inyecta un `DATABASE_URL` de otro Postgres, el catálogo puede verse bien pero las ventas fallan con `pos_ventas does not exist`. El backend prioriza `DB_*` cuando están definidas.
+
+Al arrancar, en logs del backend debe aparecer: `[POS] DB=radiocolonia_db pos_ventas=sí`.
 | `API_TOKEN`     | No          | Bearer para proteger POST/PATCH en producción |
 | `VITE_API_URL`  | No          | Default `/api/v1` (mismo dominio que el UI vía proxy). Si API y UI están en dominios distintos: `https://api-pos.tudominio.com/api/v1` |
 

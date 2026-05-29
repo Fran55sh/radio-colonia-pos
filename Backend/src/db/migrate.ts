@@ -1,8 +1,10 @@
 import { pool } from "../config/db.js";
-import { applyPosSchema } from "./ensure-pos-schema.js";
+import { applyPosSchema, logDbTarget } from "./ensure-pos-schema.js";
 
 async function migrate() {
+  await logDbTarget();
   await applyPosSchema();
+  await logDbTarget();
   console.log("Migración POS completada.");
   await pool.end();
 }

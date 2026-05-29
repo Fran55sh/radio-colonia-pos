@@ -1,7 +1,11 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
-import { checkDbConnection } from "./config/db.js";
-import { ensurePosSchema, posTablesExist } from "./db/ensure-pos-schema.js";
+import { checkDbConnection, pool } from "./config/db.js";
+import {
+  ensurePosSchema,
+  logDbTarget,
+  posTablesExist,
+} from "./db/ensure-pos-schema.js";
 import { env } from "./config/env.js";
 import { errorHandler } from "./middleware/errors.js";
 import { optionalApiToken } from "./middleware/auth.js";
@@ -43,10 +47,18 @@ export async function buildApp() {
   app.get("/health", async () => {
     await refreshHealthCache();
     const { dbOk, posSchema } = healthCache;
+    let database_name: string | undefined;
+    if (dbOk) {
+      const { rows } = await pool.query<{ db: string }>(
+        "SELECT current_database() AS db",
+      );
+      database_name = rows[0]?.db;
+    }
     return {
       status: dbOk && posSchema ? "ok" : "degraded",
       service: "radio-colonia-pos-api",
       database: dbOk ? "connected" : "disconnected",
+      database_name,
       pos_schema: posSchema ? "ready" : "missing",
     };
   });
@@ -66,7 +78,9 @@ export async function buildApp() {
 }
 
 export async function startServer() {
+  await logDbTarget();
   await ensurePosSchema();
+  await logDbTarget();
   const app = await buildApp();
   await app.listen({ port: env.PORT, host: env.HOST });
   return app;
