@@ -2,7 +2,7 @@
 
 ## Requisito previo
 
-El POS usa la **misma PostgreSQL** que el ecommerce (`radiocolonia_db`). En esa base deben existir:
+El POS usa la **misma PostgreSQL** que el ecommerce (mismo `DB_HOST`, `DB_USER`, `DB_PASSWORD`, **`DB_NAME`**). En Coolify la base suele llamarse `postgres`; en desarrollo local a veces `radiocolonia_db`. En esa base deben existir:
 
 - Schema ecommerce (`products`, `product_variants`, `suppliers`, …)
 - Tablas POS (`pos_ventas`, `pos_lineas_venta`, …) vía migración `0005_pos_operational_tables.sql` del repo **Radio Colonia/app**
@@ -51,7 +51,7 @@ Si el monorepo tiene la carpeta `radio-colonia-pos` dentro de otro repo:
 | `DB_HOST`    | Hostname interno Coolify del Postgres del ecommerce |
 | `DB_USER`    | `radiocolonia`                   |
 | `DB_PASSWORD`| (secreto del recurso Database)   |
-| `DB_NAME`    | `radiocolonia_db`                |
+| `DB_NAME`    | **Igual que el ecommerce** (ej. `postgres` en Coolify) |
 | `DB_PORT`    | `5432`                           |
 
 ### Variables del stack POS
@@ -61,12 +61,20 @@ Si el monorepo tiene la carpeta `radio-colonia-pos` dentro de otro repo:
 | `DB_HOST`       | Sí          | Postgres ecommerce |
 | `DB_USER`       | Sí          | |
 | `DB_PASSWORD`   | Sí          | |
-| `DB_NAME`       | Sí          | `radiocolonia_db` |
+| `DB_NAME`       | Sí          | Copiar del ecommerce (ej. `postgres`) |
 | `CORS_ORIGIN`   | Sí          | URL pública del frontend POS (ej. `https://pos.tudominio.com`) |
 
-**Importante:** no agregues `DATABASE_URL` al stack POS salvo que sea **idéntica** a `DB_*` (mismo host y `radiocolonia_db`). Si Coolify inyecta un `DATABASE_URL` de otro Postgres, el catálogo puede verse bien pero las ventas fallan con `pos_ventas does not exist`. El backend prioriza `DB_*` cuando están definidas.
+**Crítico — mismas variables que el ecommerce**
 
-Al arrancar, en logs del backend debe aparecer: `[POS] DB=radiocolonia_db pos_ventas=sí`.
+Copiá al stack POS **exactamente** las mismas `DB_*` que el servicio web del ecommerce (mismo host, usuario, contraseña y **`DB_NAME`**).
+
+En muchos despliegues Coolify: `DB_USER=postgres`, `DB_NAME=postgres`. Eso es válido si el ecommerce usa esos valores.
+
+| Acción | Detalle |
+|--------|---------|
+| Copiar | `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_PORT` del ecommerce |
+| Evitar | `DATABASE_URL` en el POS si difiere de esas `DB_*` (el backend prioriza `DB_*`) |
+| Verificar | Log: `[POS] DB=postgres pos_ventas=sí` (el nombre debe coincidir con `DB_NAME` del ecommerce) |
 | `API_TOKEN`     | No          | Bearer para proteger POST/PATCH en producción |
 | `VITE_API_URL`  | No          | Default `/api/v1` (mismo dominio que el UI vía proxy). Si API y UI están en dominios distintos: `https://api-pos.tudominio.com/api/v1` |
 

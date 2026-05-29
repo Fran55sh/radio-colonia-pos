@@ -9,6 +9,10 @@ export const pool = new Pool({
   idleTimeoutMillis: 30_000,
 });
 
+pool.on("connect", (client) => {
+  void client.query("SET search_path TO public");
+});
+
 export type DbClient = pg.PoolClient;
 
 export async function withTransaction<T>(

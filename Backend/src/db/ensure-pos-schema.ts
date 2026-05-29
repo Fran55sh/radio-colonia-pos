@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pool } from "../config/db.js";
-import { env } from "../config/env.js";
+import { CONFIGURED_DB_NAME, env } from "../config/env.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -54,20 +54,54 @@ export async function logDbTarget(): Promise<void> {
             ) AS has_pos`,
   );
   const redacted = env.DATABASE_URL.replace(/:[^:@]+@/, ":****@");
+  const db = rows[0]?.db ?? "?";
   console.log(
-    `[POS] DB=${rows[0]?.db} pos_ventas=${rows[0]?.has_pos ? "sí" : "no"} url=${redacted}`,
+    `[POS] DB=${db} pos_ventas=${rows[0]?.has_pos ? "sí" : "no"} url=${redacted}`,
   );
+  if (CONFIGURED_DB_NAME && db !== CONFIGURED_DB_NAME) {
+    console.error(
+      `[POS] Base incorrecta: conectado a "${db}", DB_NAME=${CONFIGURED_DB_NAME}. ` +
+        "Copiá DB_* exactamente del stack del ecommerce.",
+    );
+  }
+}
+
+let schemaApplyLock: Promise<void> | null = null;
+
+export async function validateConnectedDatabase(): Promise<void> {
+  if (!CONFIGURED_DB_NAME) return;
+  const { rows } = await pool.query<{ db: string }>(
+    "SELECT current_database() AS db",
+  );
+  const db = rows[0]?.db;
+  if (db && db !== CONFIGURED_DB_NAME) {
+    throw new Error(
+      `DB_NAME=${CONFIGURED_DB_NAME} pero current_database()="${db}". ` +
+        "Revisá DB_HOST y eliminá DATABASE_URL si apunta a otra base.",
+    );
+  }
 }
 
 export async function applyPosSchema(): Promise<void> {
-  await assertEcommerceSchema();
-  const sql = readFileSync(schemaPath(), "utf-8");
-  const statements = splitSqlStatements(sql);
-  console.log(`Aplicando schema.pos.sql (${statements.length} sentencias)...`);
-  for (const statement of statements) {
-    await pool.query(statement);
+  if (schemaApplyLock) {
+    await schemaApplyLock;
+    return;
   }
-  console.log("Schema POS aplicado.");
+  schemaApplyLock = (async () => {
+    await assertEcommerceSchema();
+    const sql = readFileSync(schemaPath(), "utf-8");
+    const statements = splitSqlStatements(sql);
+    console.log(`Aplicando schema.pos.sql (${statements.length} sentencias)...`);
+    for (const statement of statements) {
+      await pool.query(statement);
+    }
+    console.log("Schema POS aplicado.");
+  })();
+  try {
+    await schemaApplyLock;
+  } finally {
+    schemaApplyLock = null;
+  }
 }
 
 /** Idempotente: crea tablas pos_* si aún no existen. */

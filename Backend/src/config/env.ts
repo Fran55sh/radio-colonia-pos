@@ -14,17 +14,33 @@ function buildDatabaseUrlFromParts(): string | undefined {
   return `postgresql://${u}:${p}@${host}:${port}/${dbName}`;
 }
 
+/** DB_NAME declarado en el stack (debe coincidir con el ecommerce). */
+export const CONFIGURED_DB_NAME = process.env.DB_NAME?.trim() || undefined;
+
+function databaseNameFromUrl(url: string): string | undefined {
+  try {
+    const name = new URL(url).pathname.replace(/^\//, "").trim();
+    return name || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveDatabaseUrl(): string {
   const built = buildDatabaseUrlFromParts();
   const direct = process.env.DATABASE_URL?.trim();
 
-  // Coolify a veces inyecta DATABASE_URL de otro Postgres; DB_* debe ganar.
+  // Coolify: priorizar DB_* iguales al stack del ecommerce.
   if (built) {
-    if (direct && direct !== built) {
-      console.warn(
-        `[POS] DATABASE_URL y DB_* no coinciden. Usando DB_NAME=${process.env.DB_NAME}. ` +
-          "Eliminá DATABASE_URL del stack POS en Coolify si apunta a otra base.",
-      );
+    if (direct) {
+      const urlDb = databaseNameFromUrl(direct);
+      const partsDb = process.env.DB_NAME?.trim();
+      if (direct !== built) {
+        console.warn(
+          `[POS] DATABASE_URL y DB_* difieren. Usando DB_HOST/DB_NAME del stack ` +
+            `(${partsDb ?? urlDb ?? "?"}). Eliminá DATABASE_URL del POS si no es la misma conexión que el ecommerce.`,
+        );
+      }
     }
     return built;
   }
@@ -32,7 +48,7 @@ function resolveDatabaseUrl(): string {
   if (direct) return direct;
 
   throw new Error(
-    "Configurá DATABASE_URL o DB_HOST, DB_USER, DB_PASSWORD, DB_NAME (y opcionalmente DB_PORT).",
+    "Configurá DB_HOST, DB_USER, DB_PASSWORD, DB_NAME (mismos valores que el ecommerce) o DATABASE_URL.",
   );
 }
 

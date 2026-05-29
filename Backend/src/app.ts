@@ -5,6 +5,7 @@ import {
   ensurePosSchema,
   logDbTarget,
   posTablesExist,
+  validateConnectedDatabase,
 } from "./db/ensure-pos-schema.js";
 import { env } from "./config/env.js";
 import { errorHandler } from "./middleware/errors.js";
@@ -79,6 +80,7 @@ export async function buildApp() {
 
 export async function startServer() {
   await logDbTarget();
+  await validateConnectedDatabase();
   await ensurePosSchema();
   await logDbTarget();
   const app = await buildApp();
