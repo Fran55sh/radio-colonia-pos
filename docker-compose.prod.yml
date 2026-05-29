@@ -1,4 +1,4 @@
-# Producción: frontend compilado + vite preview en :8080 (sin hot reload)
+# Producción local: frontend Nitro (puerto 3000) + backend
 # Uso: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 services:
@@ -7,11 +7,15 @@ services:
       context: ./Frontend
       dockerfile: Dockerfile
       target: production
+      args:
+        VITE_PROXY_TARGET: http://backend:3001
     container_name: radio-colonia-frontend
     environment:
+      PORT: 3000
+      HOST: 0.0.0.0
       VITE_PROXY_TARGET: http://backend:3001
     ports:
-      - "8080:4173"
+      - "8080:3000"
     volumes: []
     depends_on:
       - backend

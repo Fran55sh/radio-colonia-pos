@@ -47,9 +47,10 @@ services:
       target: production
       args:
         VITE_API_URL: ${VITE_API_URL:-/api/v1}
+        VITE_PROXY_TARGET: http://backend:3001
     restart: unless-stopped
     ports:
-      - "4173:4173"
+      - "3000:3000"
     networks:
       - coolify
     healthcheck:
@@ -58,13 +59,15 @@ services:
           "CMD",
           "node",
           "-e",
-          "require('http').get('http://127.0.0.1:4173/',(r)=>process.exit(r.statusCode>=200&&r.statusCode<500?0:1)).on('error',()=>process.exit(1))",
+          "require('http').get('http://127.0.0.1:3000/',(r)=>process.exit(r.statusCode>=200&&r.statusCode<500?0:1)).on('error',()=>process.exit(1))",
         ]
       interval: 20s
       timeout: 5s
       retries: 5
-      start_period: 60s
+      start_period: 90s
     environment:
+      PORT: 3000
+      HOST: 0.0.0.0
       VITE_PROXY_TARGET: http://backend:3001
     depends_on:
       backend:

@@ -74,10 +74,10 @@ Asigná dominios en la UI (formato con puerto interno, según docs de Coolify):
 
 | Servicio   | Puerto interno | Uso |
 |------------|----------------|-----|
-| `frontend` | `4173`         | **Pantalla de caja** — dominio principal del POS |
-| `backend`  | `3001`         | Opcional (API directa). Si solo usás el UI, el proxy `/api` del frontend llega al backend por red Docker |
+| `frontend` | `3000`         | **Pantalla de caja** (Nitro node-server) — dominio principal del POS |
+| `backend`  | `3001`         | Opcional (API directa). El UI hace proxy de `/api` y `/health` al backend |
 
-Ejemplo UI: `https://pos.radiocolonia.com.ar:4173`
+Ejemplo UI: `https://pos.radiocolonia.com.ar:3000`
 
 `CORS_ORIGIN` debe incluir la URL pública del frontend (sin path).
 

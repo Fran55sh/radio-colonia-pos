@@ -1,27 +1,31 @@
-// @lovable.dev/vite-tanstack-config already includes the following — do NOT add them manually
-// or the app will break with duplicate plugins:
-//   - tanstackStart, viteReact, tailwindcss, tsConfigPaths, cloudflare (build-only),
-//     componentTagger (dev-only), VITE_* env injection, @ path alias, React/TanStack dedupe,
-//     error logger plugins, and sandbox detection (port/host/strictPort).
-// You can pass additional config via defineConfig({ vite: { ... } }) if needed.
+// @lovable.dev/vite-tanstack-config: tanstackStart, react, tailwind, paths, etc.
+// Producción Docker/Coolify: cloudflare: false + nitro preset node-server.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import { nitro } from "nitro/vite";
 
-// Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
-// @cloudflare/vite-plugin builds from this — wrangler.jsonc main alone is insufficient.
+const apiProxyTarget = process.env.VITE_PROXY_TARGET ?? "http://127.0.0.1:3001";
+
 export default defineConfig({
-  tanstackStart: {
-    server: { entry: "server" },
-  },
+  cloudflare: false,
+  plugins: [
+    nitro({
+      preset: "node-server",
+      routeRules: {
+        "/api/**": { proxy: `${apiProxyTarget}/api/**` },
+        "/health": { proxy: `${apiProxyTarget}/health` },
+      },
+    }),
+  ],
   vite: {
     server: {
       host: true,
       proxy: {
         "/api": {
-          target: process.env.VITE_PROXY_TARGET ?? "http://localhost:3001",
+          target: apiProxyTarget,
           changeOrigin: true,
         },
         "/health": {
-          target: process.env.VITE_PROXY_TARGET ?? "http://localhost:3001",
+          target: apiProxyTarget,
           changeOrigin: true,
         },
       },

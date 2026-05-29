@@ -55,7 +55,8 @@ docker compose up --build
 
 | Servicio   | URL                   |
 |------------|-----------------------|
-| POS (UI)   | http://localhost:5173 |
+| POS (UI) dev | http://localhost:5173 |
+| POS (UI) prod local | http://localhost:3000 (tras `npm run build` + `npm run start`) |
 | API        | http://localhost:3001 |
 | PostgreSQL | localhost:5433 (`radiocolonia_db`) |
 
@@ -74,7 +75,7 @@ Resumen:
 1. Migraciones ecommerce aplicadas (incl. `0005_pos_operational_tables.sql`).
 2. En Coolify: Base Directory `/` y Compose Location `/docker-compose.yaml`.
 3. Variables `DB_*` del recurso Database del ecommerce.
-4. Dominio en servicio **`frontend`** (puerto interno `4173`).
+4. Dominio en servicio **`frontend`** (puerto interno `3000`, Nitro node-server).
 5. `CORS_ORIGIN` = URL pública del POS.
 
 Variables de ejemplo: [`.env.coolify.example`](.env.coolify.example)
