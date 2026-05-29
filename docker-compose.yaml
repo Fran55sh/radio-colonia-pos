@@ -11,8 +11,9 @@ services:
       context: ./Backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    ports:
-      - "3001:3001"
+    # Sin mapeo al host: Coolify enruta por red coolify (evita choque con ecommerce en :3000).
+    expose:
+      - "3001"
     networks:
       - coolify
     healthcheck:
@@ -49,8 +50,8 @@ services:
         VITE_API_URL: ${VITE_API_URL:-/api/v1}
         VITE_PROXY_TARGET: http://backend:3001
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     networks:
       - coolify
     healthcheck:

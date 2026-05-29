@@ -77,7 +77,9 @@ Asigná dominios en la UI (formato con puerto interno, según docs de Coolify):
 | `frontend` | `3000`         | **Pantalla de caja** (Nitro node-server) — dominio principal del POS |
 | `backend`  | `3001`         | Opcional (API directa). El UI hace proxy de `/api` y `/health` al backend |
 
-Ejemplo UI: `https://pos.radiocolonia.com.ar:3000`
+Ejemplo UI en Coolify: dominio en servicio `frontend`, puerto **interno** `3000` (ej. `https://pos.tudominio.com:3000` en la UI de Coolify).
+
+No publiques `3000:3000` en el host si el ecommerce ya usa el puerto 3000; el `docker-compose.yaml` usa solo `expose` y la red `coolify`.
 
 `CORS_ORIGIN` debe incluir la URL pública del frontend (sin path).
 
