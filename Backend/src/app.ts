@@ -3,6 +3,7 @@ import Fastify from "fastify";
 import { checkDbConnection, pool } from "./config/db.js";
 import {
   ensurePosSchema,
+  isPosSchemaReady,
   logDbTarget,
   posTablesExist,
   validateConnectedDatabase,
@@ -28,7 +29,8 @@ async function refreshHealthCache(): Promise<void> {
   const now = Date.now();
   if (now - healthCache.checkedAt < HEALTH_CACHE_MS) return;
   const dbOk = await checkDbConnection();
-  const posSchema = dbOk ? await posTablesExist() : false;
+  const posSchema =
+    dbOk && (isPosSchemaReady() || (await posTablesExist()));
   healthCache.checkedAt = now;
   healthCache.dbOk = dbOk;
   healthCache.posSchema = posSchema;

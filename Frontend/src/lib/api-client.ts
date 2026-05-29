@@ -106,7 +106,12 @@ export async function checkApiConnection(): Promise<ApiConnectionStatus> {
     const apiUp = health.status === "ok" || health.status === "degraded";
     return {
       online: apiUp && dbUp,
-      salesReady: dbUp && (health.pos_schema === "ready" || health.status === "ok"),
+      // "ok" o "degraded" con DB: el aviso falso salía cuando /health cacheaba "missing" bajo carga.
+      salesReady:
+        dbUp &&
+        (health.pos_schema === "ready" ||
+          health.status === "ok" ||
+          (health.status === "degraded" && health.database === "connected")),
     };
   }
 

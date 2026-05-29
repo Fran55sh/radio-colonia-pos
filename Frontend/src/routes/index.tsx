@@ -317,12 +317,6 @@ function POS() {
         </div>
       )}
 
-      {online && !salesReady && (
-        <div className="px-5 py-2 bg-amber-500/10 text-amber-200 text-xs border-b border-amber-500/30">
-          API conectada. Las ventas requieren tablas <code className="text-amber-100">pos_*</code> en la base — redeploy del backend o migración 0005.
-        </div>
-      )}
-
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-[65%_35%] min-h-0">
         <section className="border-r border-border flex flex-col min-h-0">
           <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-charcoal/60">

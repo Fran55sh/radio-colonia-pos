@@ -6,8 +6,19 @@ import { CONFIGURED_DB_NAME, env } from "../config/env.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+/** Confirmado al arrancar; evita falsos "missing" bajo carga en /health. */
+let posSchemaReady = false;
+
 function schemaPath() {
   return join(__dirname, "schema.pos.sql");
+}
+
+export function markPosSchemaReady(): void {
+  posSchemaReady = true;
+}
+
+export function isPosSchemaReady(): boolean {
+  return posSchemaReady;
 }
 
 /** Divide el SQL en sentencias (node-pg no ejecuta bien scripts multi-statement en todos los entornos). */
@@ -67,6 +78,7 @@ export async function logDbTarget(): Promise<void> {
 }
 
 let schemaApplyLock: Promise<void> | null = null;
+let schemaReadyPromise: Promise<void> | null = null;
 
 export async function validateConnectedDatabase(): Promise<void> {
   if (!CONFIGURED_DB_NAME) return;
@@ -82,7 +94,7 @@ export async function validateConnectedDatabase(): Promise<void> {
   }
 }
 
-export async function applyPosSchema(): Promise<void> {
+async function applyPosSchemaInternal(): Promise<void> {
   if (schemaApplyLock) {
     await schemaApplyLock;
     return;
@@ -104,15 +116,37 @@ export async function applyPosSchema(): Promise<void> {
   }
 }
 
-/** Idempotente: crea tablas pos_* si aún no existen. */
-export async function ensurePosSchema(): Promise<void> {
+export async function applyPosSchema(): Promise<void> {
+  await applyPosSchemaInternal();
   if (await posTablesExist()) {
+    markPosSchemaReady();
+  }
+}
+
+async function ensurePosSchemaInternal(): Promise<void> {
+  if (posSchemaReady || (await posTablesExist())) {
+    markPosSchemaReady();
     return;
   }
   console.warn("Tablas pos_* no encontradas; aplicando schema POS...");
-  await applyPosSchema();
+  await applyPosSchemaInternal();
   if (!(await posTablesExist())) {
     throw new Error("No se pudo crear pos_ventas tras aplicar schema.pos.sql");
+  }
+  markPosSchemaReady();
+}
+
+/** Idempotente y single-flight: crea tablas pos_* una sola vez por proceso. */
+export async function ensurePosSchema(): Promise<void> {
+  if (posSchemaReady) return;
+  if (!schemaReadyPromise) {
+    schemaReadyPromise = ensurePosSchemaInternal();
+  }
+  try {
+    await schemaReadyPromise;
+  } catch (err) {
+    schemaReadyPromise = null;
+    throw err;
   }
 }
 
