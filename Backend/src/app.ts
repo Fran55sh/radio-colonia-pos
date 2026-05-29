@@ -1,6 +1,7 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { checkDbConnection } from "./config/db.js";
+import { ensurePosSchema, posTablesExist } from "./db/ensure-pos-schema.js";
 import { env } from "./config/env.js";
 import { errorHandler } from "./middleware/errors.js";
 import { optionalApiToken } from "./middleware/auth.js";
@@ -21,13 +22,20 @@ export async function buildApp() {
   app.addHook("preHandler", optionalApiToken);
   app.setErrorHandler(errorHandler);
 
-  app.get("/health", async () => {
+  app.get("/health", async (_req, reply) => {
     const dbOk = await checkDbConnection();
-    return {
-      status: dbOk ? "ok" : "degraded",
+    const posSchema = dbOk ? await posTablesExist() : false;
+    const ok = dbOk && posSchema;
+    const body = {
+      status: ok ? "ok" : "degraded",
       service: "radio-colonia-pos-api",
       database: dbOk ? "connected" : "disconnected",
+      pos_schema: posSchema ? "ready" : "missing",
     };
+    if (!ok) {
+      return reply.status(503).send(body);
+    }
+    return body;
   });
 
   await app.register(
@@ -45,6 +53,7 @@ export async function buildApp() {
 }
 
 export async function startServer() {
+  await ensurePosSchema();
   const app = await buildApp();
   await app.listen({ port: env.PORT, host: env.HOST });
   return app;
