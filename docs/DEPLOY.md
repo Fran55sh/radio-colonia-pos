@@ -83,6 +83,8 @@ Ejemplo UI: `https://pos.radiocolonia.com.ar:3000`
 
 ### Arranque
 
+El `Dockerfile` del frontend usa **dos etapas**: `builder` (`npm ci` con devDependencies) y `production` (solo copia `.output/`). No poner `NODE_ENV=production` antes del build o fallará con `@lovable.dev/vite-tanstack-config` not found.
+
 El backend ejecuta al iniciar:
 
 1. `schema.pos.sql` (tablas `pos_*`, idempotente)
