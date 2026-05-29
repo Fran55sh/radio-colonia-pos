@@ -29,10 +29,15 @@ export async function withTransaction<T>(
 }
 
 export async function checkDbConnection(): Promise<boolean> {
-  try {
-    await pool.query("SELECT 1");
-    return true;
-  } catch {
-    return false;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await pool.query("SELECT 1");
+      return true;
+    } catch {
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 40));
+      }
+    }
   }
+  return false;
 }

@@ -76,13 +76,54 @@ export async function syncOfflineVentas(
   });
 }
 
-export async function checkApiHealth(): Promise<boolean> {
+export type ApiConnectionStatus = {
+  /** API alcanzable (red / proxy OK). */
+  online: boolean;
+  /** Tablas pos_* listas para registrar ventas. */
+  salesReady: boolean;
+};
+
+type HealthBody = {
+  status?: string;
+  database?: string;
+  pos_schema?: string;
+};
+
+async function fetchHealth(): Promise<HealthBody | null> {
   try {
     const base = API_BASE.replace(/\/api\/v1\/?$/, "");
     const res = await fetch(`${base}/health`);
-    const data = (await res.json()) as { status?: string };
-    return res.ok && data.status === "ok";
+    return (await res.json()) as HealthBody;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function checkApiConnection(): Promise<ApiConnectionStatus> {
+  const health = await fetchHealth();
+  if (health) {
+    const dbUp = health.database === "connected";
+    const apiUp = health.status === "ok" || health.status === "degraded";
+    return {
+      online: apiUp && dbUp,
+      salesReady: dbUp && (health.pos_schema === "ready" || health.status === "ok"),
+    };
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/pos/productos`);
+    if (res.ok) {
+      return { online: true, salesReady: true };
+    }
+  } catch {
+    /* red caída */
+  }
+
+  return { online: false, salesReady: false };
+}
+
+/** @deprecated Usar checkApiConnection */
+export async function checkApiHealth(): Promise<boolean> {
+  const s = await checkApiConnection();
+  return s.online;
 }

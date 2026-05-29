@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Trash2, Wifi, WifiOff, ScanLine, Plus, RefreshCw } from "lucide-react";
 import {
-  checkApiHealth,
+  checkApiConnection,
   createVenta,
   fetchProductos,
   syncOfflineVentas,
@@ -37,11 +37,13 @@ function POS() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [scan, setScan] = useState("");
   const [online, setOnline] = useState(true);
+  const [salesReady, setSalesReady] = useState(true);
   const [now, setNow] = useState(new Date());
   const [toast, setToast] = useState<string | null>(null);
   const [pendingOffline, setPendingOffline] = useState(0);
   const [processing, setProcessing] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
+  const offlineStreakRef = useRef(0);
 
   const { data: catalog = [], isLoading, isError, refetch } = useQuery({
     queryKey: ["pos-productos"],
@@ -60,9 +62,19 @@ function POS() {
   }, []);
 
   const checkConnection = useCallback(async () => {
-    const ok = await checkApiHealth();
-    setOnline(ok);
-    return ok;
+    const status = await checkApiConnection();
+    if (status.online) {
+      offlineStreakRef.current = 0;
+      setOnline(true);
+      setSalesReady(status.salesReady);
+    } else {
+      offlineStreakRef.current += 1;
+      if (offlineStreakRef.current >= 2) {
+        setOnline(false);
+      }
+      setSalesReady(status.salesReady);
+    }
+    return status;
   }, []);
 
   useEffect(() => {
@@ -233,13 +245,17 @@ function POS() {
   const itemCount = useMemo(() => cart.reduce((s, i) => s + i.qty, 0), [cart]);
 
   const toggleOnline = async () => {
-    const ok = await checkConnection();
-    if (!ok) {
+    const status = await checkConnection();
+    if (!status.online) {
       setOnline(false);
       flash("Sin conexión al servidor. Modo offline activo.");
       return;
     }
     setOnline(true);
+    if (!status.salesReady) {
+      flash("API conectada, pero faltan tablas POS en la base (pos_ventas).");
+      return;
+    }
     flash("Conexión restablecida.");
     void syncOfflineQueue();
   };
@@ -298,6 +314,12 @@ function POS() {
       {isError && (
         <div className="px-5 py-2 bg-offline/10 text-offline text-xs border-b border-offline/30">
           No se pudo cargar el catálogo. Verificá que el backend esté en ejecución (puerto 3001).
+        </div>
+      )}
+
+      {online && !salesReady && (
+        <div className="px-5 py-2 bg-amber-500/10 text-amber-200 text-xs border-b border-amber-500/30">
+          API conectada. Las ventas requieren tablas <code className="text-amber-100">pos_*</code> en la base — redeploy del backend o migración 0005.
         </div>
       )}
 
