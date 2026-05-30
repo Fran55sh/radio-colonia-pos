@@ -18,9 +18,11 @@ bun install   # o npm install
 
 ## Base de datos
 
+El schema lo administra el **migrador del ecommerce**. El POS solo verifica al arrancar:
+
 ```bash
-bun run db:migrate
-bun run db:seed
+bun run db:verify
+bun run db:seed   # solo desarrollo
 ```
 
 ## Desarrollo

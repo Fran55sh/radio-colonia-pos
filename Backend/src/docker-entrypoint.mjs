@@ -11,7 +11,7 @@ function run(cmd, args) {
 }
 
 async function main() {
-  console.log("Ejecutando migraciones POS (tablas pos_*)...");
+  console.log("Verificando schema POS (solo lectura, sin DDL)...");
   await run("node", ["dist/db/migrate.js"]);
 
   const nodeEnv = process.env.NODE_ENV ?? "development";

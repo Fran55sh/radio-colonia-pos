@@ -77,22 +77,19 @@ export async function syncOfflineVentas(
 }
 
 export type ApiConnectionStatus = {
-  /** API alcanzable (red / proxy OK). */
   online: boolean;
-  /** Tablas pos_* listas para registrar ventas. */
-  salesReady: boolean;
 };
 
 type HealthBody = {
   status?: string;
   database?: string;
-  pos_schema?: string;
 };
 
 async function fetchHealth(): Promise<HealthBody | null> {
   try {
     const base = API_BASE.replace(/\/api\/v1\/?$/, "");
     const res = await fetch(`${base}/health`);
+    if (!res.ok) return null;
     return (await res.json()) as HealthBody;
   } catch {
     return null;
@@ -104,27 +101,19 @@ export async function checkApiConnection(): Promise<ApiConnectionStatus> {
   if (health) {
     const dbUp = health.database === "connected";
     const apiUp = health.status === "ok" || health.status === "degraded";
-    return {
-      online: apiUp && dbUp,
-      // "ok" o "degraded" con DB: el aviso falso salía cuando /health cacheaba "missing" bajo carga.
-      salesReady:
-        dbUp &&
-        (health.pos_schema === "ready" ||
-          health.status === "ok" ||
-          (health.status === "degraded" && health.database === "connected")),
-    };
+    return { online: apiUp && dbUp };
   }
 
   try {
     const res = await fetch(`${API_BASE}/pos/productos`);
     if (res.ok) {
-      return { online: true, salesReady: true };
+      return { online: true };
     }
   } catch {
     /* red caída */
   }
 
-  return { online: false, salesReady: false };
+  return { online: false };
 }
 
 /** @deprecated Usar checkApiConnection */

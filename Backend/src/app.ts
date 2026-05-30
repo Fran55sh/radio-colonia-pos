@@ -2,12 +2,11 @@ import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { checkDbConnection, pool } from "./config/db.js";
 import {
-  ensurePosSchema,
-  isPosSchemaReady,
+  assertRequiredSchema,
+  isSchemaReady,
   logDbTarget,
-  posTablesExist,
   validateConnectedDatabase,
-} from "./db/ensure-pos-schema.js";
+} from "./db/verify-schema.js";
 import { env } from "./config/env.js";
 import { errorHandler } from "./middleware/errors.js";
 import { optionalApiToken } from "./middleware/auth.js";
@@ -20,7 +19,6 @@ import { posRoutes } from "./modules/pos/routes.js";
 const healthCache = {
   checkedAt: 0,
   dbOk: true,
-  posSchema: true,
 };
 
 const HEALTH_CACHE_MS = 10_000;
@@ -28,12 +26,8 @@ const HEALTH_CACHE_MS = 10_000;
 async function refreshHealthCache(): Promise<void> {
   const now = Date.now();
   if (now - healthCache.checkedAt < HEALTH_CACHE_MS) return;
-  const dbOk = await checkDbConnection();
-  const posSchema =
-    dbOk && (isPosSchemaReady() || (await posTablesExist()));
+  healthCache.dbOk = await checkDbConnection();
   healthCache.checkedAt = now;
-  healthCache.dbOk = dbOk;
-  healthCache.posSchema = posSchema;
 }
 
 export async function buildApp() {
@@ -49,7 +43,8 @@ export async function buildApp() {
 
   app.get("/health", async () => {
     await refreshHealthCache();
-    const { dbOk, posSchema } = healthCache;
+    const { dbOk } = healthCache;
+    const schemaReady = isSchemaReady();
     let database_name: string | undefined;
     if (dbOk) {
       const { rows } = await pool.query<{ db: string }>(
@@ -58,11 +53,11 @@ export async function buildApp() {
       database_name = rows[0]?.db;
     }
     return {
-      status: dbOk && posSchema ? "ok" : "degraded",
+      status: dbOk && schemaReady ? "ok" : "degraded",
       service: "radio-colonia-pos-api",
       database: dbOk ? "connected" : "disconnected",
       database_name,
-      pos_schema: posSchema ? "ready" : "missing",
+      schema_ready: schemaReady,
     };
   });
 
@@ -83,7 +78,7 @@ export async function buildApp() {
 export async function startServer() {
   await logDbTarget();
   await validateConnectedDatabase();
-  await ensurePosSchema();
+  await assertRequiredSchema();
   await logDbTarget();
   const app = await buildApp();
   await app.listen({ port: env.PORT, host: env.HOST });

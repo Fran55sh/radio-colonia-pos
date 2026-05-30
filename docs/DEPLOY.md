@@ -1,136 +1,125 @@
 # Deploy POS (Docker / Coolify)
 
+## Principio
+
+- **Una sola autoridad de esquema:** migrador del ecommerce ([Radio Colonia/app/migrate.sh](../Radio%20Colonia/app/migrate.sh)).
+- **POS solo DML:** nunca crea tablas en runtime.
+- **Fail-fast:** si faltan tablas, el deploy del POS falla al arrancar (no en plena venta).
+
 ## Requisito previo
 
-El POS usa la **misma PostgreSQL** que el ecommerce (mismo `DB_HOST`, `DB_USER`, `DB_PASSWORD`, **`DB_NAME`**). En Coolify la base suele llamarse `postgres`; en desarrollo local a veces `radiocolonia_db`. En esa base deben existir:
+El POS usa la **misma PostgreSQL** que el ecommerce (mismas `DB_*`). En Coolify la base suele llamarse `postgres`.
 
-- Schema ecommerce (`products`, `product_variants`, `suppliers`, …)
-- Tablas POS (`pos_ventas`, `pos_lineas_venta`, …) vía migración `0005_pos_operational_tables.sql` del repo **Radio Colonia/app**
+Tablas requeridas (creadas por el migrador del ecommerce, incl. `0005_pos_operational_tables.sql`):
 
-Aplicá las migraciones del ecommerce **antes** del primer deploy del POS (recurso `migrator` o `migrate.sh` en Coolify).
+- Ecommerce: `products`, `product_variants`, `suppliers`, `product_supplier_offers`, …
+- POS: `pos_ventas`, `pos_lineas_venta`, `pos_iva_registro`, …
+
+**Orden de deploy:** ecommerce (migrador) → POS.
 
 ---
 
 ## Coolify (recomendado)
 
-### Archivo Compose y campos en Coolify
+### 1. Migrador del ecommerce (automático)
 
-Usá **`docker-compose.yaml`** en la raíz del repo `radio-colonia-pos`.
+En el stack del **ecommerce**, configurá el servicio `migrator` (target `migrator` del Dockerfile) como paso que corre en cada deploy:
 
-En la UI de Coolify (Build Pack → Docker Compose):
+```bash
+docker compose -f docker-compose.prod.yml run --rm migrate
+```
 
-| Campo | Valor correcto |
-|-------|----------------|
-| **Base Directory** | `/` (raíz del repo; vacío si tu repo es solo `radio-colonia-pos`) |
-| **Docker Compose Location** | `/docker-compose.yaml` |
+O en Coolify: **Pre/Post Deploy Command** en el servicio web del ecommerce que ejecute el migrator y falle si no termina OK.
 
-Formato válido: empieza con `/`, solo letras, números, guiones y barras. Ejemplos válidos: `/docker-compose.yaml`, `/docker-compose.yml`.
+El migrador aplica SQL idempotente (incl. `pos_*`) y valida que existan antes de continuar.
 
-**No uses** (suelen dar error *format is invalid* o no encontrar el archivo):
+### 2. Postgres managed (persistente)
 
-- `docker-compose.coolify.yml` (nombre con punto extra; la UI no lo acepta)
-- Rutas de Windows (`G:\...`, `C:\...`)
-- Rutas sin barra inicial (`docker-compose.yaml` sin `/` al principio, según versión de Coolify)
+Usá el recurso **Database** de Coolify del ecommerce. Los managed conservan volumen entre deploys.
 
-- **No** uses `docker-compose.yml` para Coolify (ese es el stack de **desarrollo** con Postgres local).
-- **No** uses solo `docker-compose.prod.yml` (solo override del frontend).
+Copiá al stack POS **exactamente** las mismas variables:
 
-Si el monorepo tiene la carpeta `radio-colonia-pos` dentro de otro repo:
+| Variable | Descripción |
+|----------|-------------|
+| `DB_HOST` | Host interno del Postgres del ecommerce |
+| `DB_USER` | Igual que ecommerce (ej. `postgres`) |
+| `DB_PASSWORD` | Igual que ecommerce |
+| `DB_NAME` | Igual que ecommerce (ej. `postgres`) |
+| `DB_PORT` | `5432` |
 
-| Campo | Valor |
-|-------|--------|
-| Base Directory | `/radio-colonia-pos` |
+**No** definas `DATABASE_URL` en el POS si contradice `DB_*`.
+
+### 3. Stack POS
+
+Usá **`docker-compose.yaml`** en la raíz del repo.
+
+| Campo Coolify | Valor |
+|---------------|-------|
+| Base Directory | `/` |
 | Docker Compose Location | `/docker-compose.yaml` |
 
-### Postgres
+Variables obligatorias del POS:
 
-**No** levantes el servicio `postgres` del compose de desarrollo. Creá o reutilizá el recurso **Database** del ecommerce y copiá las variables de conexión al stack del POS.
+| Variable | Descripción |
+|----------|-------------|
+| `DB_*` | Copiadas del ecommerce |
+| `CORS_ORIGIN` | URL pública del frontend POS |
+| `API_TOKEN` | Opcional |
 
-| Variable     | Ejemplo                          |
-|--------------|----------------------------------|
-| `DB_HOST`    | Hostname interno Coolify del Postgres del ecommerce |
-| `DB_USER`    | `radiocolonia`                   |
-| `DB_PASSWORD`| (secreto del recurso Database)   |
-| `DB_NAME`    | **Igual que el ecommerce** (ej. `postgres` en Coolify) |
-| `DB_PORT`    | `5432`                           |
+### 4. Arranque del backend POS
 
-### Variables del stack POS
+Al iniciar el contenedor:
 
-| Variable        | Obligatoria | Descripción |
-|-----------------|-------------|-------------|
-| `DB_HOST`       | Sí          | Postgres ecommerce |
-| `DB_USER`       | Sí          | |
-| `DB_PASSWORD`   | Sí          | |
-| `DB_NAME`       | Sí          | Copiar del ecommerce (ej. `postgres`) |
-| `CORS_ORIGIN`   | Sí          | URL pública del frontend POS (ej. `https://pos.tudominio.com`) |
+1. **Verificación de schema** (`npm run db:verify` / `dist/db/migrate.js`) — solo lectura, **exit 1** si falta alguna tabla.
+2. Sin seed en producción (`POS_SEED_DEMO=false`).
+3. API en puerto `3001`.
 
-**Crítico — mismas variables que el ecommerce**
+Log esperado:
 
-Copiá al stack POS **exactamente** las mismas `DB_*` que el servicio web del ecommerce (mismo host, usuario, contraseña y **`DB_NAME`**).
+```text
+[POS] DB=postgres pos_ventas=sí url=postgresql://...
+Verificación de schema POS completada.
+```
 
-En muchos despliegues Coolify: `DB_USER=postgres`, `DB_NAME=postgres`. Eso es válido si el ecommerce usa esos valores.
+Si falta el esquema, el contenedor **no arranca** → deploy falla en Coolify.
 
-| Acción | Detalle |
-|--------|---------|
-| Copiar | `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_PORT` del ecommerce |
-| Evitar | `DATABASE_URL` en el POS si difiere de esas `DB_*` (el backend prioriza `DB_*`) |
-| Verificar | Log: `[POS] DB=postgres pos_ventas=sí` (el nombre debe coincidir con `DB_NAME` del ecommerce) |
-| `API_TOKEN`     | No          | Bearer para proteger POST/PATCH en producción |
-| `VITE_API_URL`  | No          | Default `/api/v1` (mismo dominio que el UI vía proxy). Si API y UI están en dominios distintos: `https://api-pos.tudominio.com/api/v1` |
+### 5. Dominios
 
-`POS_SEED_DEMO` queda en `false` en el compose (sin catálogo dummy).
-
-### Dominios en Coolify
-
-Asigná dominios en la UI (formato con puerto interno, según docs de Coolify):
-
-| Servicio   | Puerto interno | Uso |
-|------------|----------------|-----|
-| `frontend` | `3000`         | **Pantalla de caja** (Nitro node-server) — dominio principal del POS |
-| `backend`  | `3001`         | Opcional (API directa). El UI hace proxy de `/api` y `/health` al backend |
-
-Ejemplo UI en Coolify: dominio en servicio `frontend`, puerto **interno** `3000` (ej. `https://pos.tudominio.com:3000` en la UI de Coolify).
-
-No publiques `3000:3000` en el host si el ecommerce ya usa el puerto 3000; el `docker-compose.yaml` usa solo `expose` y la red `coolify`.
-
-`CORS_ORIGIN` debe incluir la URL pública del frontend (sin path).
-
-### Arranque
-
-El `Dockerfile` del frontend usa **dos etapas**: `builder` (`npm ci` con devDependencies) y `production` (solo copia `.output/`). No poner `NODE_ENV=production` antes del build o fallará con `@lovable.dev/vite-tanstack-config` not found.
-
-El backend ejecuta al iniciar:
-
-1. `schema.pos.sql` (tablas `pos_*`, idempotente)
-2. Sin seed de catálogo en producción
-3. API en puerto `3001`
-
-### Healthchecks
-
-- API: `GET /health`
-- UI: `GET /` en puerto `4173`
+| Servicio | Puerto interno | Uso |
+|----------|----------------|-----|
+| `frontend` | `3000` | Pantalla de caja (dominio principal) |
+| `backend` | `3001` | API (proxy vía frontend en `/api`) |
 
 ### Checklist
 
-- [ ] Migraciones ecommerce aplicadas (incl. `0005`)
-- [ ] Compose: `docker-compose.coolify.yml`
-- [ ] `DB_*` apuntan al Postgres del ecommerce
-- [ ] Dominio en servicio `frontend`
-- [ ] `CORS_ORIGIN` = URL del frontend
-- [ ] `POS_SEED_DEMO` no activado en producción
+- [ ] Migrador ecommerce corre en cada deploy del ecommerce
+- [ ] `DB_*` del POS = mismas que ecommerce
+- [ ] Sin `DATABASE_URL` conflictiva en POS
+- [ ] Deploy ecommerce antes que POS
+- [ ] Log: `Verificación de schema POS completada`
 
 ---
 
 ## Local (desarrollo)
 
+1. Levantá Postgres y migrá con el **ecommerce**:
+
 ```bash
+cd "Radio Colonia/app"
+docker compose -f docker-compose.prod.yml up -d postgres
+docker compose -f docker-compose.prod.yml run --rm migrate
+```
+
+2. POS apuntando a la misma base:
+
+```bash
+cd radio-colonia-pos
 docker compose up --build
 ```
 
-## Local (producción simulada)
+Verificación manual:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+cd Backend
+npm run db:verify
 ```
-
-Incluye Postgres local; no usar para producción real.

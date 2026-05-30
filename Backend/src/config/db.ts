@@ -11,19 +11,10 @@ export const pool = new Pool({
 
 export type DbClient = pg.PoolClient;
 
-export type TransactionOptions = {
-  /**
-   * Llamado si la transacción falla. Si devuelve true, la transacción se
-   * reintenta UNA vez sobre la MISMA conexión (útil para crear tablas pos_*
-   * que falten en esa conexión concreta del pool).
-   */
-  recover?: (client: DbClient, error: unknown) => Promise<boolean>;
-};
-
-async function runInTransaction<T>(
-  client: DbClient,
+export async function withTransaction<T>(
   fn: (client: DbClient) => Promise<T>,
 ): Promise<T> {
+  const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const result = await fn(client);
@@ -32,23 +23,6 @@ async function runInTransaction<T>(
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
-  }
-}
-
-export async function withTransaction<T>(
-  fn: (client: DbClient) => Promise<T>,
-  options?: TransactionOptions,
-): Promise<T> {
-  const client = await pool.connect();
-  try {
-    try {
-      return await runInTransaction(client, fn);
-    } catch (error) {
-      if (options?.recover && (await options.recover(client, error))) {
-        return await runInTransaction(client, fn);
-      }
-      throw error;
-    }
   } finally {
     client.release();
   }

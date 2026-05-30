@@ -1,2 +1,3 @@
--- DEPRECADO: usar schema.pos.sql vía npm run db:migrate.
--- El catálogo (products, product_variants, suppliers) lo administra el ecommerce.
+-- DEPRECADO: el schema POS lo administra el migrador del ecommerce
+-- (Radio Colonia/app/src/db/migrations/0005_pos_operational_tables.sql).
+-- El catálogo (products, product_variants, suppliers) también lo administra el ecommerce.

@@ -1,15 +1,20 @@
 import { pool } from "../config/db.js";
-import { applyPosSchema, logDbTarget } from "./ensure-pos-schema.js";
+import {
+  assertRequiredSchema,
+  logDbTarget,
+  validateConnectedDatabase,
+} from "./verify-schema.js";
 
-async function migrate() {
+async function verify() {
   await logDbTarget();
-  await applyPosSchema();
+  await validateConnectedDatabase();
+  await assertRequiredSchema();
   await logDbTarget();
-  console.log("Migración POS completada.");
+  console.log("Verificación de schema POS completada.");
   await pool.end();
 }
 
-migrate().catch((err) => {
-  console.error("Error en migración:", err);
+verify().catch((err) => {
+  console.error("Error en verificación de schema:", err);
   process.exit(1);
 });

@@ -7,7 +7,6 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
-RUN cp src/db/schema.pos.sql dist/db/schema.pos.sql
 
 FROM node:22-alpine AS runner
 WORKDIR /app

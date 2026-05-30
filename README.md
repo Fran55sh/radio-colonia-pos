@@ -27,13 +27,13 @@ npm run db:push
 npm run db:seed
 ```
 
-Luego el POS (solo tablas operativas `pos_*`):
+Luego el POS (verifica schema; no crea tablas):
 
 ```bash
 cd ../../radio-colonia-pos/Backend
 cp .env.example .env
 npm install
-npm run db:migrate
+npm run db:verify
 npm run dev
 ```
 

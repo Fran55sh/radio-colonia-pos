@@ -37,7 +37,6 @@ function POS() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [scan, setScan] = useState("");
   const [online, setOnline] = useState(true);
-  const [salesReady, setSalesReady] = useState(true);
   const [now, setNow] = useState(new Date());
   const [toast, setToast] = useState<string | null>(null);
   const [pendingOffline, setPendingOffline] = useState(0);
@@ -66,13 +65,11 @@ function POS() {
     if (status.online) {
       offlineStreakRef.current = 0;
       setOnline(true);
-      setSalesReady(status.salesReady);
     } else {
       offlineStreakRef.current += 1;
       if (offlineStreakRef.current >= 2) {
         setOnline(false);
       }
-      setSalesReady(status.salesReady);
     }
     return status;
   }, []);
@@ -252,10 +249,6 @@ function POS() {
       return;
     }
     setOnline(true);
-    if (!status.salesReady) {
-      flash("API conectada, pero faltan tablas POS en la base (pos_ventas).");
-      return;
-    }
     flash("Conexión restablecida.");
     void syncOfflineQueue();
   };
