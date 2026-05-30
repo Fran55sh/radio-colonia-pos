@@ -15,6 +15,16 @@ import {
   loadOfflineQueue,
   removeFromQueue,
 } from "@/lib/offline-queue";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export const Route = createFileRoute("/")({
   component: POS,
@@ -41,7 +51,10 @@ function POS() {
   const [toast, setToast] = useState<string | null>(null);
   const [pendingOffline, setPendingOffline] = useState(0);
   const [processing, setProcessing] = useState(false);
+  const [pendingProduct, setPendingProduct] = useState<ProductoCaja | null>(null);
+  const [qtyInput, setQtyInput] = useState("1");
   const scanRef = useRef<HTMLInputElement>(null);
+  const qtyRef = useRef<HTMLInputElement>(null);
   const offlineStreakRef = useRef(0);
 
   const { data: catalog = [], isLoading, isError, refetch } = useQuery({
@@ -114,36 +127,107 @@ function POS() {
     setTimeout(() => setToast(null), 2500);
   }, []);
 
-  const addByCode = useCallback(
-    (raw: string) => {
-      const code = raw.trim().toLowerCase();
-      if (!code) return;
-      const product = catalog.find((p) => p.codigo_interno === code);
-      if (!product) {
-        flash(`Código "${raw}" no encontrado`);
+  const sortedCatalog = useMemo(
+    () => [...catalog].sort((a, b) => a.nombre.localeCompare(b.nombre, "es")),
+    [catalog],
+  );
+  const filtered = useMemo(() => {
+    const q = scan.trim().toLowerCase();
+    if (!q) return [];
+    return sortedCatalog.filter(
+      (p) => p.codigo_interno.toLowerCase().includes(q) || p.nombre.toLowerCase().includes(q),
+    );
+  }, [scan, sortedCatalog]);
+
+  const addToCart = useCallback(
+    (product: ProductoCaja, qty: number) => {
+      if (qty <= 0) {
+        flash("La cantidad debe ser mayor a 0");
         return;
       }
       if (product.stock <= 0) {
         flash(`Sin stock: ${product.nombre}`);
         return;
       }
+      if (qty > product.stock) {
+        flash(`Stock insuficiente (disponible: ${product.stock})`);
+        return;
+      }
+
       setCart((prev) => {
         const existing = prev.find((i) => i.codigo_interno === product.codigo_interno);
         if (existing) {
-          if (existing.qty >= product.stock) {
+          const nextQty = existing.qty + qty;
+          if (nextQty > product.stock) {
             flash(`Stock máximo alcanzado (${product.stock})`);
             return prev;
           }
           return prev.map((i) =>
-            i.codigo_interno === product.codigo_interno ? { ...i, qty: i.qty + 1 } : i,
+            i.codigo_interno === product.codigo_interno ? { ...i, qty: nextQty } : i,
           );
         }
-        return [...prev, { ...product, qty: 1 }];
+        return [...prev, { ...product, qty }];
       });
-      setScan("");
     },
-    [catalog, flash],
+    [flash],
   );
+
+  const promptAddProduct = useCallback((product: ProductoCaja) => {
+    setPendingProduct(product);
+    setQtyInput("1");
+  }, []);
+
+  const closeQtyDialog = useCallback(() => {
+    setPendingProduct(null);
+    setQtyInput("1");
+    setTimeout(focusScan, 0);
+  }, [focusScan]);
+
+  const confirmAddProduct = useCallback(() => {
+    if (!pendingProduct) return;
+    const qty = parseInt(qtyInput, 10);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      flash("Ingresá una cantidad válida");
+      return;
+    }
+    addToCart(pendingProduct, qty);
+    setScan("");
+    closeQtyDialog();
+  }, [pendingProduct, qtyInput, addToCart, flash, closeQtyDialog]);
+
+  useEffect(() => {
+    if (pendingProduct) {
+      const t = setTimeout(() => qtyRef.current?.select(), 50);
+      return () => clearTimeout(t);
+    }
+  }, [pendingProduct]);
+
+  const submitScan = useCallback(() => {
+    const q = scan.trim().toLowerCase();
+    if (!q) return;
+    const exact = catalog.find((p) => p.codigo_interno === q);
+    if (exact) {
+      if (exact.stock <= 0) {
+        flash(`Sin stock: ${exact.nombre}`);
+        return;
+      }
+      promptAddProduct(exact);
+      return;
+    }
+    const matches = sortedCatalog.filter(
+      (p) => p.codigo_interno.includes(q) || p.nombre.toLowerCase().includes(q),
+    );
+    if (matches.length > 0) {
+      const product = matches[0];
+      if (product.stock <= 0) {
+        flash(`Sin stock: ${product.nombre}`);
+        return;
+      }
+      promptAddProduct(product);
+      return;
+    }
+    flash(`Código "${scan}" no encontrado`);
+  }, [scan, catalog, sortedCatalog, flash, promptAddProduct]);
 
   const handlePay = useCallback(
     async (method: string) => {
@@ -228,17 +312,6 @@ function POS() {
     setCart((prev) => prev.filter((i) => i.codigo_interno !== code));
 
   const total = useMemo(() => cart.reduce((s, i) => s + i.qty * i.precio_venta, 0), [cart]);
-  const sortedCatalog = useMemo(
-    () => [...catalog].sort((a, b) => a.nombre.localeCompare(b.nombre, "es")),
-    [catalog],
-  );
-  const filtered = useMemo(() => {
-    const q = scan.trim().toLowerCase();
-    if (!q) return [];
-    return sortedCatalog.filter(
-      (p) => p.codigo_interno.toLowerCase().includes(q) || p.nombre.toLowerCase().includes(q),
-    );
-  }, [scan, sortedCatalog]);
   const itemCount = useMemo(() => cart.reduce((s, i) => s + i.qty, 0), [cart]);
 
   const toggleOnline = async () => {
@@ -254,7 +327,7 @@ function POS() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-midnight text-foreground font-mono">
+    <div className="h-screen flex flex-col overflow-hidden bg-midnight text-foreground font-mono">
       <header className="h-14 shrink-0 border-b border-border bg-charcoal flex items-center px-5 gap-4">
         <div className="flex items-center gap-2">
           <div className="size-8 rounded-md bg-primary grid place-items-center text-primary-foreground font-bold">R</div>
@@ -310,7 +383,7 @@ function POS() {
         </div>
       )}
 
-      <main className="flex-1 grid grid-cols-1 lg:grid-cols-[65%_35%] min-h-0">
+      <main className="flex-1 grid grid-cols-1 lg:grid-cols-[65%_35%] min-h-0 overflow-hidden">
         <section className="border-r border-border flex flex-col min-h-0">
           <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-charcoal/60">
             <h2 className="text-xs font-bold uppercase tracking-widest text-silver">Venta en curso</h2>
@@ -375,17 +448,13 @@ function POS() {
           </div>
         </section>
 
-        <aside className="flex flex-col min-h-0 bg-charcoal/40">
-          <div className="p-5 border-b border-border relative">
+        <aside className="flex flex-col min-h-0 overflow-hidden bg-charcoal/40">
+          <div className="shrink-0 p-5 border-b border-border relative">
             <label className="text-[11px] uppercase tracking-widest text-silver font-bold">Escaneo</label>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (filtered.length > 0 && scan.trim() && !catalog.find((p) => p.codigo_interno === scan.trim().toLowerCase())) {
-                  addByCode(filtered[0].codigo_interno);
-                } else {
-                  addByCode(scan);
-                }
+                submitScan();
               }}
               className="mt-2 relative"
             >
@@ -408,7 +477,15 @@ function POS() {
                 {filtered.slice(0, 8).map((p) => (
                   <button
                     key={p.codigo_interno}
-                    onMouseDown={(e) => { e.preventDefault(); addByCode(p.codigo_interno); }}
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      if (p.stock <= 0) {
+                        flash(`Sin stock: ${p.nombre}`);
+                        return;
+                      }
+                      promptAddProduct(p);
+                    }}
                     className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-charcoal border-b border-border/40 last:border-0"
                   >
                     <span className="text-[10px] uppercase tracking-wider text-primary font-bold w-20 shrink-0">{p.codigo_interno}</span>
@@ -421,18 +498,25 @@ function POS() {
             )}
           </div>
 
-          <div className="flex flex-col flex-1 min-h-0">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-charcoal/60">
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border bg-charcoal/60">
               <h3 className="text-[11px] uppercase tracking-widest text-silver font-bold">Lista de precios</h3>
               <span className="text-[11px] text-silver">
                 {isLoading ? "Cargando…" : `${sortedCatalog.length} ítems · A–Z`}
               </span>
             </div>
-            <div className="flex-1 overflow-auto divide-y divide-border/40">
+            <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-border/40">
               {sortedCatalog.map((p) => (
                 <button
                   key={p.codigo_interno}
-                  onClick={() => addByCode(p.codigo_interno)}
+                  type="button"
+                  onClick={() => {
+                    if (p.stock <= 0) {
+                      flash(`Sin stock: ${p.nombre}`);
+                      return;
+                    }
+                    promptAddProduct(p);
+                  }}
                   disabled={p.stock <= 0}
                   className="group w-full grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-5 py-2.5 text-left hover:bg-charcoal transition-colors disabled:opacity-40"
                 >
@@ -475,6 +559,53 @@ function POS() {
           {toast}
         </div>
       )}
+
+      <Dialog open={pendingProduct !== null} onOpenChange={(open) => { if (!open) closeQtyDialog(); }}>
+        <DialogContent
+          className="bg-charcoal border-border text-silver-light sm:max-w-md"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              confirmAddProduct();
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle className="text-silver-light">Cantidad a agregar</DialogTitle>
+            <DialogDescription className="text-silver">
+              {pendingProduct?.nombre}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3 py-2">
+            <div className="flex items-center justify-between text-xs text-silver">
+              <span className="uppercase tracking-wider font-bold">{pendingProduct?.codigo_interno}</span>
+              <span className="tabular-nums">
+                {pendingProduct ? formatCLP(pendingProduct.precio_venta) : ""} · stk {pendingProduct?.stock ?? 0}
+              </span>
+            </div>
+            <Input
+              ref={qtyRef}
+              type="number"
+              min={1}
+              max={pendingProduct?.stock ?? 1}
+              value={qtyInput}
+              onChange={(e) => setQtyInput(e.target.value)}
+              className="h-12 text-lg font-semibold tabular-nums bg-midnight border-primary text-silver-light"
+              autoFocus
+            />
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={closeQtyDialog} className="border-border text-silver-light">
+              Cancelar
+            </Button>
+            <Button type="button" onClick={confirmAddProduct} className="bg-primary text-primary-foreground hover:bg-accent">
+              Agregar al carrito
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

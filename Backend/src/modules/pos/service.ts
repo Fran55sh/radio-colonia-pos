@@ -2,6 +2,7 @@ import type { DbClient } from "../../config/db.js";
 import { withTransaction } from "../../config/db.js";
 import {
   decrementVariantStock,
+  formatPosProductName,
   getVariantForSale,
   listCatalogForPos,
   type ProductoCaja,
@@ -68,7 +69,7 @@ export async function processSale(
       lineasDetalle.push({
         variant_id: variant.variant_id,
         sku_snapshot: variant.sku,
-        name_snapshot: variant.nombre,
+        name_snapshot: formatPosProductName(variant.product_name, variant.attributes),
         cantidad: linea.cantidad,
         precio_unitario: precio,
         cost_price_snapshot: variant.cost_price,

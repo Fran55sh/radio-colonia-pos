@@ -6,13 +6,27 @@ export type CatalogRow = {
   variant_id: string;
   product_id: string;
   sku: string;
-  nombre: string;
+  product_name: string;
+  attributes: Record<string, string>;
   precio_venta: number;
   stock: number;
   cost_price: number | null;
   supplier_id: string | null;
   supplier_code: string | null;
 };
+
+/** Nombre visible en caja: producto + valores de atributos (ej. "Cable 1mt"). */
+export function formatPosProductName(
+  productName: string,
+  attributes: Record<string, string> | null | undefined,
+): string {
+  if (!attributes || typeof attributes !== "object") return productName;
+  const values = Object.values(attributes)
+    .map((v) => String(v).trim())
+    .filter(Boolean);
+  if (values.length === 0) return productName;
+  return `${productName} ${values.join(" ")}`.trim();
+}
 
 export type ProductoCaja = {
   codigo_interno: string;
@@ -27,7 +41,8 @@ const CATALOG_SELECT = `
     pv.id AS variant_id,
     p.id AS product_id,
     LOWER(pv.sku) AS sku,
-    p.name AS nombre,
+    p.name AS product_name,
+    pv.attributes AS attributes,
     COALESCE(pv.sale_price, p.price)::float AS precio_venta,
     pv.stock,
     (
@@ -63,7 +78,7 @@ export async function listCatalogForPos(client: DbClient): Promise<ProductoCaja[
   );
   return rows.map((r) => ({
     codigo_interno: r.sku,
-    nombre: r.nombre,
+    nombre: formatPosProductName(r.product_name, r.attributes),
     precio_venta: r.precio_venta,
     stock: r.stock,
     alicuota_iva: DEFAULT_IVA_ALICUOTA,
