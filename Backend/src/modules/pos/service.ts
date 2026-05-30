@@ -1,6 +1,10 @@
 import type { DbClient } from "../../config/db.js";
 import { withTransaction } from "../../config/db.js";
 import {
+  applyPosSchemaOnClient,
+  isMissingPosTableError,
+} from "../../db/ensure-pos-schema.js";
+import {
   decrementVariantStock,
   getVariantForSale,
   listCatalogForPos,
@@ -12,6 +16,22 @@ import { AppError } from "../../middleware/errors.js";
 import type { CreateSaleInput } from "./schemas.js";
 
 export type { ProductoCaja };
+
+/**
+ * Si la conexión de esta venta no tiene las tablas pos_*, las crea sobre
+ * esa misma conexión y deja que la transacción se reintente una vez.
+ */
+async function recoverMissingPosTables(
+  client: DbClient,
+  error: unknown,
+): Promise<boolean> {
+  if (!isMissingPosTableError(error)) return false;
+  console.warn(
+    "[POS] pos_* ausente en esta conexión; creando schema en el mismo cliente y reintentando...",
+  );
+  await applyPosSchemaOnClient(client);
+  return true;
+}
 
 export async function listProductosCaja(client: DbClient): Promise<ProductoCaja[]> {
   return listCatalogForPos(client);
@@ -145,7 +165,7 @@ export async function processSale(
       total: totalVenta,
       client_sale_id: input.client_sale_id,
     };
-  });
+  }, { recover: recoverMissingPosTables });
 }
 
 export async function processOfflineBatch(

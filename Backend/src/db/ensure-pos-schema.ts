@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { pool } from "../config/db.js";
+import { pool, type DbClient } from "../config/db.js";
 import { CONFIGURED_DB_NAME, env } from "../config/env.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -57,8 +57,13 @@ export async function posTablesExist(): Promise<boolean> {
 }
 
 export async function logDbTarget(): Promise<void> {
-  const { rows } = await pool.query<{ db: string; has_pos: boolean }>(
+  const { rows } = await pool.query<{
+    db: string;
+    has_pos: boolean;
+    server: string | null;
+  }>(
     `SELECT current_database() AS db,
+            host(inet_server_addr()) AS server,
             EXISTS (
               SELECT 1 FROM information_schema.tables
               WHERE table_schema = 'public' AND table_name = 'pos_ventas'
@@ -67,7 +72,7 @@ export async function logDbTarget(): Promise<void> {
   const redacted = env.DATABASE_URL.replace(/:[^:@]+@/, ":****@");
   const db = rows[0]?.db ?? "?";
   console.log(
-    `[POS] DB=${db} pos_ventas=${rows[0]?.has_pos ? "sí" : "no"} url=${redacted}`,
+    `[POS] DB=${db} server=${rows[0]?.server ?? "?"} pos_ventas=${rows[0]?.has_pos ? "sí" : "no"} url=${redacted}`,
   );
   if (CONFIGURED_DB_NAME && db !== CONFIGURED_DB_NAME) {
     console.error(
@@ -120,6 +125,20 @@ export async function applyPosSchema(): Promise<void> {
   await applyPosSchemaInternal();
   if (await posTablesExist()) {
     markPosSchemaReady();
+  }
+}
+
+/**
+ * Aplica el schema POS sobre una conexión específica del pool.
+ * Necesario porque el pool puede abrir varias conexiones y, según la infra
+ * (HA / réplicas / hostname con varias IPs), una conexión puede no tener
+ * todavía las tablas pos_*. Se crea sobre la MISMA conexión que reintentará.
+ */
+export async function applyPosSchemaOnClient(client: DbClient): Promise<void> {
+  const sql = readFileSync(schemaPath(), "utf-8");
+  const statements = splitSqlStatements(sql);
+  for (const statement of statements) {
+    await client.query(statement);
   }
 }
 
