@@ -53,8 +53,10 @@ function POS() {
   const [processing, setProcessing] = useState(false);
   const [pendingProduct, setPendingProduct] = useState<ProductoCaja | null>(null);
   const [qtyInput, setQtyInput] = useState("1");
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
   const scanRef = useRef<HTMLInputElement>(null);
   const qtyRef = useRef<HTMLInputElement>(null);
+  const searchResultRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const offlineStreakRef = useRef(0);
 
   const { data: catalog = [], isLoading, isError, refetch } = useQuery({
@@ -138,6 +140,15 @@ function POS() {
       (p) => p.codigo_interno.toLowerCase().includes(q) || p.nombre.toLowerCase().includes(q),
     );
   }, [scan, sortedCatalog]);
+  const searchResults = useMemo(() => filtered.slice(0, 8), [filtered]);
+
+  useEffect(() => {
+    setHighlightedIndex(0);
+  }, [scan]);
+
+  useEffect(() => {
+    searchResultRefs.current[highlightedIndex]?.scrollIntoView({ block: "nearest" });
+  }, [highlightedIndex, searchResults]);
 
   const addToCart = useCallback(
     (product: ProductoCaja, qty: number) => {
@@ -202,32 +213,49 @@ function POS() {
     }
   }, [pendingProduct]);
 
-  const submitScan = useCallback(() => {
-    const q = scan.trim().toLowerCase();
-    if (!q) return;
-    const exact = catalog.find((p) => p.codigo_interno === q);
-    if (exact) {
-      if (exact.stock <= 0) {
-        flash(`Sin stock: ${exact.nombre}`);
-        return;
-      }
-      promptAddProduct(exact);
-      return;
-    }
-    const matches = sortedCatalog.filter(
-      (p) => p.codigo_interno.includes(q) || p.nombre.toLowerCase().includes(q),
-    );
-    if (matches.length > 0) {
-      const product = matches[0];
+  const selectSearchResult = useCallback(
+    (product: ProductoCaja) => {
       if (product.stock <= 0) {
         flash(`Sin stock: ${product.nombre}`);
         return;
       }
       promptAddProduct(product);
+    },
+    [flash, promptAddProduct],
+  );
+
+  const submitScan = useCallback(() => {
+    const q = scan.trim().toLowerCase();
+    if (!q) return;
+    if (searchResults.length > 0) {
+      selectSearchResult(searchResults[highlightedIndex] ?? searchResults[0]);
+      return;
+    }
+    const exact = catalog.find((p) => p.codigo_interno.toLowerCase() === q);
+    if (exact) {
+      selectSearchResult(exact);
       return;
     }
     flash(`Código "${scan}" no encontrado`);
-  }, [scan, catalog, sortedCatalog, flash, promptAddProduct]);
+  }, [scan, catalog, searchResults, highlightedIndex, flash, selectSearchResult]);
+
+  const handleScanKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (searchResults.length === 0) return;
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setHighlightedIndex((i) => Math.min(i + 1, searchResults.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setHighlightedIndex((i) => Math.max(i - 1, 0));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        selectSearchResult(searchResults[highlightedIndex] ?? searchResults[0]);
+      }
+    },
+    [searchResults, highlightedIndex, selectSearchResult],
+  );
 
   const handlePay = useCallback(
     async (method: string) => {
@@ -463,8 +491,15 @@ function POS() {
                 ref={scanRef}
                 value={scan}
                 onChange={(e) => setScan(e.target.value)}
+                onKeyDown={handleScanKeyDown}
                 onBlur={() => setTimeout(focusScan, 0)}
                 placeholder="Scan Barcode or Type Code [F2]"
+                role="combobox"
+                aria-expanded={searchResults.length > 0}
+                aria-autocomplete="list"
+                aria-activedescendant={
+                  searchResults.length > 0 ? `pos-search-result-${highlightedIndex}` : undefined
+                }
                 className="w-full h-14 pl-11 pr-4 rounded-lg bg-midnight border-2 border-primary text-silver-light placeholder:text-silver/50 text-base font-semibold tracking-wide outline-none focus:ring-2 focus:ring-primary/40 shadow-[0_0_0_3px_hsl(24_95%_53%/0.08)]"
                 autoComplete="off"
                 autoFocus
@@ -472,21 +507,31 @@ function POS() {
               />
             </form>
 
-            {scan.trim() && filtered.length > 0 && (
-              <div className="absolute left-5 right-5 top-[105px] z-30 mt-1 rounded-lg bg-midnight border border-primary/60 shadow-2xl max-h-72 overflow-auto">
-                {filtered.slice(0, 8).map((p) => (
+            {scan.trim() && searchResults.length > 0 && (
+              <div
+                role="listbox"
+                className="absolute left-5 right-5 top-[105px] z-30 mt-1 rounded-lg bg-midnight border border-primary/60 shadow-2xl max-h-72 overflow-auto"
+              >
+                {searchResults.map((p, idx) => (
                   <button
                     key={p.codigo_interno}
+                    id={`pos-search-result-${idx}`}
+                    ref={(el) => {
+                      searchResultRefs.current[idx] = el;
+                    }}
                     type="button"
+                    role="option"
+                    aria-selected={idx === highlightedIndex}
+                    onMouseEnter={() => setHighlightedIndex(idx)}
                     onMouseDown={(e) => {
                       e.preventDefault();
-                      if (p.stock <= 0) {
-                        flash(`Sin stock: ${p.nombre}`);
-                        return;
-                      }
-                      promptAddProduct(p);
+                      selectSearchResult(p);
                     }}
-                    className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-charcoal border-b border-border/40 last:border-0"
+                    className={`w-full flex items-center gap-3 px-3 py-2 text-left border-b border-border/40 last:border-0 ${
+                      idx === highlightedIndex
+                        ? "bg-primary/15 ring-1 ring-inset ring-primary/50"
+                        : "hover:bg-charcoal"
+                    }`}
                   >
                     <span className="text-[10px] uppercase tracking-wider text-primary font-bold w-20 shrink-0">{p.codigo_interno}</span>
                     <span className="flex-1 text-xs text-silver-light truncate">{p.nombre}</span>
