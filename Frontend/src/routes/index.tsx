@@ -2,13 +2,19 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Trash2, Wifi, WifiOff, ScanLine, Plus, RefreshCw } from "lucide-react";
+import { CustomerSelector } from "@/components/pos/CustomerSelector";
+import { FiscalResultDialog } from "@/components/pos/FiscalResultDialog";
 import {
   checkApiConnection,
+  createCliente,
   createVenta,
   fetchProductos,
   syncOfflineVentas,
+  type Cliente,
+  type FiscalResult,
   type ProductoCaja,
 } from "@/lib/api-client";
+import { formatARS } from "@/lib/format-money";
 import {
   enqueueSale,
   generateClientSaleId,
@@ -38,10 +44,6 @@ export const Route = createFileRoute("/")({
 
 type CartItem = ProductoCaja & { qty: number };
 
-function formatCLP(n: number) {
-  return new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(n);
-}
-
 function POS() {
   const queryClient = useQueryClient();
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -54,6 +56,11 @@ function POS() {
   const [pendingProduct, setPendingProduct] = useState<ProductoCaja | null>(null);
   const [qtyInput, setQtyInput] = useState("1");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [selectedCliente, setSelectedCliente] = useState<Cliente | null>(null);
+  const [fiscalDialogOpen, setFiscalDialogOpen] = useState(false);
+  const [lastFiscal, setLastFiscal] = useState<FiscalResult | null>(null);
+  const [lastVentaId, setLastVentaId] = useState(0);
+  const [lastSaleTotal, setLastSaleTotal] = useState(0);
   const scanRef = useRef<HTMLInputElement>(null);
   const qtyRef = useRef<HTMLInputElement>(null);
   const searchResultRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -274,6 +281,7 @@ function POS() {
       const clientSaleId = generateClientSaleId();
       const payload = {
         client_sale_id: clientSaleId,
+        cliente_id: selectedCliente?.id,
         medio_pago: method,
         lineas,
       };
@@ -282,15 +290,22 @@ function POS() {
         if (!online) {
           enqueueSale({ ...payload, sincronizada_offline: true, queued_at: new Date().toISOString() });
           setPendingOffline(loadOfflineQueue().length);
-          flash(`Venta guardada offline: ${method} — ${formatCLP(saleTotal)}`);
+          flash(`Venta guardada offline: ${method} — ${formatARS(saleTotal)}`);
           setCart([]);
           focusScan();
           return;
         }
 
         const result = await createVenta(payload);
-        flash(`Venta #${result.venta_id}: ${method} — ${formatCLP(result.total)}`);
+        flash(`Venta #${result.venta_id}: ${method} — ${formatARS(result.total)}`);
+        if (result.fiscal) {
+          setLastFiscal(result.fiscal);
+          setLastVentaId(result.venta_id);
+          setLastSaleTotal(result.total);
+          setFiscalDialogOpen(true);
+        }
         setCart([]);
+        setSelectedCliente(null);
         void queryClient.invalidateQueries({ queryKey: ["pos-productos"] });
         focusScan();
       } catch (err) {
@@ -310,12 +325,13 @@ function POS() {
         setProcessing(false);
       }
     },
-    [cart, online, processing, flash, focusScan, queryClient, refetch],
+    [cart, online, processing, flash, focusScan, queryClient, refetch, selectedCliente],
   );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "F2") { e.preventDefault(); focusScan(); }
+      if (e.key === "F3") { e.preventDefault(); /* selector via header */ }
       if (e.key === "F8") { e.preventDefault(); void handlePay("Efectivo"); }
       if (e.key === "F9") { e.preventDefault(); void handlePay("Débito/Crédito"); }
       if (e.key === "F10") { e.preventDefault(); void handlePay("Mercado Pago QR"); }
@@ -367,6 +383,12 @@ function POS() {
 
         <div className="flex-1" />
 
+        <CustomerSelector
+          selected={selectedCliente}
+          onSelect={setSelectedCliente}
+          onCreate={createCliente}
+        />
+
         {pendingOffline > 0 && (
           <span className="text-[11px] text-offline font-semibold">
             Cola offline: {pendingOffline}
@@ -397,10 +419,10 @@ function POS() {
 
         <div className="text-right leading-tight">
           <div className="text-sm text-silver-light tabular-nums">
-            {now.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+            {now.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
           </div>
           <div className="text-[11px] text-silver">
-            {now.toLocaleDateString("es-CL", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })}
+            {now.toLocaleDateString("es-AR", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })}
           </div>
         </div>
       </header>
@@ -456,9 +478,9 @@ function POS() {
                         <button onClick={() => updateQty(item.codigo_interno, +1)} className="size-6 rounded border border-border text-silver hover:bg-charcoal hover:text-silver-light">+</button>
                       </div>
                     </td>
-                    <td className="px-3 py-3 text-right text-silver tabular-nums">{formatCLP(item.precio_venta)}</td>
+                    <td className="px-3 py-3 text-right text-silver tabular-nums">{formatARS(item.precio_venta)}</td>
                     <td className="px-3 py-3 text-right text-silver-light font-semibold tabular-nums">
-                      {formatCLP(item.precio_venta * item.qty)}
+                      {formatARS(item.precio_venta * item.qty)}
                     </td>
                     <td className="px-5 py-3 text-right">
                       <button
@@ -535,7 +557,7 @@ function POS() {
                   >
                     <span className="text-[10px] uppercase tracking-wider text-primary font-bold w-20 shrink-0">{p.codigo_interno}</span>
                     <span className="flex-1 text-xs text-silver-light truncate">{p.nombre}</span>
-                    <span className="text-xs text-silver tabular-nums">{formatCLP(p.precio_venta)}</span>
+                    <span className="text-xs text-silver tabular-nums">{formatARS(p.precio_venta)}</span>
                     <span className="text-[10px] text-silver/60">stk {p.stock}</span>
                   </button>
                 ))}
@@ -567,7 +589,7 @@ function POS() {
                 >
                   <span className="text-[10px] uppercase tracking-wider text-primary font-bold w-20">{p.codigo_interno}</span>
                   <span className="text-xs text-silver-light truncate">{p.nombre}</span>
-                  <span className="text-xs font-semibold text-silver-light tabular-nums">{formatCLP(p.precio_venta)}</span>
+                  <span className="text-xs font-semibold text-silver-light tabular-nums">{formatARS(p.precio_venta)}</span>
                   <Plus className="size-3.5 text-silver/40 group-hover:text-primary" />
                 </button>
               ))}
@@ -586,7 +608,7 @@ function POS() {
             <div className="text-right">
               <div className="text-5xl font-bold text-silver-light tabular-nums leading-none">
                 <span className="text-primary mr-2">$</span>
-                {new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 }).format(total)}
+                {new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(total)}
               </div>
             </div>
           </div>
@@ -604,6 +626,15 @@ function POS() {
           {toast}
         </div>
       )}
+
+      <FiscalResultDialog
+        open={fiscalDialogOpen}
+        onOpenChange={setFiscalDialogOpen}
+        fiscal={lastFiscal}
+        ventaId={lastVentaId}
+        total={lastSaleTotal}
+        formatMoney={formatARS}
+      />
 
       <Dialog open={pendingProduct !== null} onOpenChange={(open) => { if (!open) closeQtyDialog(); }}>
         <DialogContent
@@ -626,7 +657,7 @@ function POS() {
             <div className="flex items-center justify-between text-xs text-silver">
               <span className="uppercase tracking-wider font-bold">{pendingProduct?.codigo_interno}</span>
               <span className="tabular-nums">
-                {pendingProduct ? formatCLP(pendingProduct.precio_venta) : ""} · stk {pendingProduct?.stock ?? 0}
+                {pendingProduct ? formatARS(pendingProduct.precio_venta) : ""} · stk {pendingProduct?.stock ?? 0}
               </span>
             </div>
             <Input

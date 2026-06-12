@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { createClienteSchema, updateClienteSchema } from "./schemas.js";
+import { createClienteSchema, listClientesQuerySchema, updateClienteSchema } from "./schemas.js";
 import {
   createCliente,
   getCliente,
@@ -9,8 +9,9 @@ import {
 } from "./service.js";
 
 export async function clientesRoutes(app: FastifyInstance) {
-  app.get("/", async (_req, reply) => {
-    return reply.send({ clientes: await listClientes() });
+  app.get("/", async (request, reply) => {
+    const query = listClientesQuerySchema.parse(request.query);
+    return reply.send({ clientes: await listClientes(query.search, query.limit) });
   });
 
   app.get("/:id", async (request, reply) => {

@@ -14,6 +14,7 @@ import { analyticsRoutes } from "./modules/analytics/routes.js";
 import { clientesRoutes } from "./modules/clientes/routes.js";
 import { comprasRoutes } from "./modules/compras/routes.js";
 import { contabilidadRoutes } from "./modules/contabilidad/routes.js";
+import { fiscalRoutes } from "./modules/fiscal/routes.js";
 import { posRoutes } from "./modules/pos/routes.js";
 
 const healthCache = {
@@ -64,6 +65,7 @@ export async function buildApp() {
   await app.register(
     async (api) => {
       await api.register(posRoutes, { prefix: "/pos" });
+      await api.register(fiscalRoutes, { prefix: "/fiscal" });
       await api.register(comprasRoutes, { prefix: "/compras" });
       await api.register(contabilidadRoutes, { prefix: "/contabilidad" });
       await api.register(clientesRoutes, { prefix: "/clientes" });

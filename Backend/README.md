@@ -43,7 +43,9 @@ Servidor en `http://localhost:3001` (por defecto).
 | Compras | `POST /api/v1/compras/ordenes` | Orden con códigos de proveedor |
 | Contabilidad | `GET /api/v1/contabilidad/iva/ventas` | Libro IVA ventas |
 | Contabilidad | `POST /api/v1/contabilidad/iva/compras/facturas` | Crédito fiscal compras |
-| Clientes | `GET /api/v1/clientes` | CRUD clientes |
+| Clientes | `GET /api/v1/clientes` | CRUD clientes (búsqueda `?search=`) |
+| Fiscal | `GET /api/v1/fiscal/ventas/:id` | Estado comprobante ARCA |
+| Fiscal | `POST /api/v1/fiscal/ventas/:id/reintentar` | Reintento emisión CAE |
 | Analytics | `GET /api/v1/analytics/facturacion-dia` | Facturación del día |
 
 ## Docker
@@ -64,3 +66,8 @@ El contenedor `backend` ejecuta migración y seed al iniciar (entrypoint Node, s
 | `PORT` | Puerto API (default 3001) |
 | `CORS_ORIGIN` | Origen del frontend Lovable |
 | `API_TOKEN` | Opcional: Bearer token para escrituras |
+| `ARCA_ENABLED` | `true` para emitir en homologación |
+| `ARCA_CUIT` | CUIT emisor (11 dígitos) |
+| `ARCA_PTO_VTA` | Punto de venta ARCA |
+| `ARCA_PRODUCTION` | `false` en desarrollo |
+| `ARCA_CERT_PATH` / `ARCA_KEY_PATH` | Certificado y clave PEM (homologación) |
