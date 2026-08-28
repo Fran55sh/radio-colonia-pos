@@ -37,6 +37,9 @@ services:
       PORT: 3001
       HOST: 0.0.0.0
       CORS_ORIGIN: http://localhost:5173,http://localhost:8080
+      POS_ACCESS_PIN: "1234"
+      POS_JWT_SECRET: "dev-pos-jwt-secret-change-me"
+      POS_SESSION_HOURS: "12"
     ports:
       - "3001:3001"
     depends_on:

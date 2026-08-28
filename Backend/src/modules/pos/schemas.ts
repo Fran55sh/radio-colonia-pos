@@ -3,6 +3,8 @@ import { z } from "zod";
 export const saleLineSchema = z.object({
   codigo_interno: z.string().min(1).max(64),
   cantidad: z.number().int().positive(),
+  /** Precio mostrado en caja (referencia; el servidor recalcula desde catálogo + tramos). */
+  precio_unitario: z.number().positive().optional(),
 });
 
 export const createSaleSchema = z.object({

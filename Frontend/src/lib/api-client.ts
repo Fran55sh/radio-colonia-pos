@@ -1,3 +1,6 @@
+import { clearToken, getToken } from "./auth-session";
+import { normalizeTiers } from "./quantity-pricing";
+
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api/v1";
 
 export type ProductoCaja = {
@@ -6,6 +9,7 @@ export type ProductoCaja = {
   precio_venta: number;
   stock: number;
   alicuota_iva: number;
+  price_tiers?: Array<{ minQty: number; unitPrice: number }>;
 };
 
 export type Cliente = {
@@ -49,6 +53,7 @@ export type FiscalResult = {
 export type SaleLine = {
   codigo_interno: string;
   cantidad: number;
+  precio_unitario?: number;
 };
 
 export type CreateSalePayload = {
@@ -78,16 +83,47 @@ export type OfflineBatchResult = {
   }>;
 };
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+export type LoginResult = {
+  token: string;
+  expires_at: string;
+};
+
+function handleUnauthorized(): void {
+  clearToken();
+  if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+    window.location.assign("/login");
+  }
+}
+
+async function apiFetch<T>(
+  path: string,
+  init?: RequestInit,
+  opts?: { skipAuthRedirect?: boolean },
+): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
+    headers,
   });
 
   const data = await res.json().catch(() => ({}));
+
+  if (res.status === 401) {
+    if (!opts?.skipAuthRedirect) {
+      handleUnauthorized();
+    }
+    const message =
+      (data as { message?: string }).message ?? "Sesión expirada o no autorizada";
+    throw new Error(message);
+  }
 
   if (!res.ok) {
     const message =
@@ -100,9 +136,45 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
+export async function fetchAuthConfig(): Promise<{ auth_required: boolean }> {
+  try {
+    const res = await fetch(`${API_BASE}/auth/config`);
+    if (!res.ok) return { auth_required: true };
+    return (await res.json()) as { auth_required: boolean };
+  } catch {
+    // Si no hay red, asumir auth requerida (login mostrará error de conexión)
+    return { auth_required: true };
+  }
+}
+
+export async function login(pin: string): Promise<LoginResult> {
+  return apiFetch<LoginResult>(
+    "/auth/login",
+    {
+      method: "POST",
+      body: JSON.stringify({ pin }),
+    },
+    { skipAuthRedirect: true },
+  );
+}
+
+function normalizeProducto(p: ProductoCaja): ProductoCaja {
+  const raw = p.price_tiers ?? [];
+  const tiers = normalizeTiers(
+    raw.map((t) => {
+      const row = t as { minQty?: number; min_qty?: number; unitPrice?: number; unit_price?: number };
+      return {
+        minQty: Number(row.minQty ?? row.min_qty ?? 0),
+        unitPrice: Number(row.unitPrice ?? row.unit_price ?? 0),
+      };
+    }),
+  );
+  return { ...p, price_tiers: tiers };
+}
+
 export async function fetchProductos(): Promise<ProductoCaja[]> {
   const data = await apiFetch<{ productos: ProductoCaja[] }>("/pos/productos");
-  return data.productos;
+  return data.productos.map(normalizeProducto);
 }
 
 export async function fetchClientes(search?: string): Promise<Cliente[]> {
@@ -161,16 +233,7 @@ export async function checkApiConnection(): Promise<ApiConnectionStatus> {
     const apiUp = health.status === "ok" || health.status === "degraded";
     return { online: apiUp && dbUp };
   }
-
-  try {
-    const res = await fetch(`${API_BASE}/pos/productos`);
-    if (res.ok) {
-      return { online: true };
-    }
-  } catch {
-    /* red caída */
-  }
-
+  // No usar /pos/productos como ping (catálogo completo).
   return { online: false };
 }
 

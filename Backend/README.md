@@ -37,6 +37,9 @@ Servidor en `http://localhost:3001` (por defecto).
 
 | Módulo | Ruta | Descripción |
 |--------|------|-------------|
+| Auth | `GET /api/v1/auth/config` | `{ auth_required }` (público) |
+| Auth | `POST /api/v1/auth/login` | Login con PIN → JWT |
+| Auth | `GET /api/v1/auth/session` | Validar sesión |
 | POS | `GET /api/v1/pos/productos` | Catálogo para caja |
 | POS | `POST /api/v1/pos/ventas` | Venta con descuento atómico de stock |
 | POS | `POST /api/v1/pos/ventas/offline-batch` | Sincronización offline |
@@ -47,6 +50,8 @@ Servidor en `http://localhost:3001` (por defecto).
 | Fiscal | `GET /api/v1/fiscal/ventas/:id` | Estado comprobante ARCA |
 | Fiscal | `POST /api/v1/fiscal/ventas/:id/reintentar` | Reintento emisión CAE |
 | Analytics | `GET /api/v1/analytics/facturacion-dia` | Facturación del día |
+
+Toda `/api/v1/*` (excepto login/config) exige `Authorization: Bearer <JWT>` o `API_TOKEN`. `GET /health` es público.
 
 ## Docker
 
@@ -64,8 +69,11 @@ El contenedor `backend` ejecuta migración y seed al iniciar (entrypoint Node, s
 |----------|-------------|
 | `DATABASE_URL` | Connection string PostgreSQL |
 | `PORT` | Puerto API (default 3001) |
-| `CORS_ORIGIN` | Origen del frontend Lovable |
-| `API_TOKEN` | Opcional: Bearer token para escrituras |
+| `CORS_ORIGIN` | Origen del frontend |
+| `POS_ACCESS_PIN` | PIN compartido del local (**obligatorio en producción**) |
+| `POS_JWT_SECRET` | Secreto JWT (**obligatorio en producción**, mín. 16 chars) |
+| `POS_SESSION_HOURS` | Duración sesión (default 12) |
+| `API_TOKEN` | Opcional: Bearer para scripts/integraciones |
 | `ARCA_ENABLED` | `true` para emitir en homologación |
 | `ARCA_CUIT` | CUIT emisor (11 dígitos) |
 | `ARCA_PTO_VTA` | Punto de venta ARCA |

@@ -64,7 +64,10 @@ Variables obligatorias del POS:
 |----------|-------------|
 | `DB_*` | Copiadas del ecommerce |
 | `CORS_ORIGIN` | URL pública del frontend POS |
-| `API_TOKEN` | Opcional |
+| `POS_ACCESS_PIN` | PIN compartido de caja (**obligatorio**) |
+| `POS_JWT_SECRET` | Secreto JWT (**obligatorio**, mín. 16 chars) |
+| `POS_SESSION_HOURS` | Duración sesión (default 12) |
+| `API_TOKEN` | Opcional (scripts) |
 
 ### 4. Arranque del backend POS
 

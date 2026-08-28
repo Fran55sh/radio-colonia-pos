@@ -1,14 +1,14 @@
 import type { DbClient } from "../../config/db.js";
 import { pool, withTransaction } from "../../config/db.js";
 import {
-  decrementVariantStock,
   formatPosProductName,
-  getVariantForSale,
   listCatalogForPos,
+  lockAndDecrementForSale,
   type ProductoCaja,
 } from "../../lib/catalog.js";
 import { DEFAULT_IVA_ALICUOTA } from "../../lib/constants.js";
 import { splitPriceWithIva } from "../../lib/iva.js";
+import { resolveUnitPrice } from "../../lib/quantity-pricing.js";
 import { AppError } from "../../middleware/errors.js";
 import { getClienteFiscalById } from "../clientes/service.js";
 import { maybeEmitirDespuesDeVenta } from "../fiscal/service.js";
@@ -69,14 +69,30 @@ async function registerSaleInTransaction(
 
   for (const linea of input.lineas) {
     const codigo = linea.codigo_interno.trim().toLowerCase();
-    const variant = await getVariantForSale(client, codigo);
+    const variant = await lockAndDecrementForSale(client, codigo, linea.cantidad);
 
-    const precio = variant.precio_venta;
+    const catalogPrice = resolveUnitPrice(
+      variant.precio_venta,
+      variant.price_tiers ?? [],
+      linea.cantidad,
+    );
+    // Precio autoritativo desde DB (incluye tramos por cantidad).
+    const precio = catalogPrice;
+
+    if (
+      linea.precio_unitario != null &&
+      catalogPrice > 0 &&
+      Math.abs(linea.precio_unitario - catalogPrice) / catalogPrice > 0.02
+    ) {
+      console.warn(
+        `[POS] Precio en caja difiere del catálogo para ${codigo}: ` +
+          `caja=${linea.precio_unitario} catálogo=${catalogPrice}`,
+      );
+    }
+
     const alicuota = DEFAULT_IVA_ALICUOTA;
     const totalLinea = precio * linea.cantidad;
     const breakdown = splitPriceWithIva(totalLinea, alicuota);
-
-    await decrementVariantStock(client, codigo, linea.cantidad);
 
     lineasDetalle.push({
       variant_id: variant.variant_id,

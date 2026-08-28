@@ -5,6 +5,8 @@ import { CONFIGURED_DB_NAME, env } from "../config/env.js";
 export const REQUIRED_TABLES = [
   "products",
   "product_variants",
+  "product_variant_price_tiers",
+  "product_price_tiers",
   "product_supplier_offers",
   "suppliers",
   "pos_clientes",

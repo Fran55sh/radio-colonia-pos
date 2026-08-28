@@ -40,6 +40,9 @@ services:
       HOST: 0.0.0.0
       CORS_ORIGIN: ${CORS_ORIGIN}
       API_TOKEN: ${API_TOKEN:-}
+      POS_ACCESS_PIN: ${POS_ACCESS_PIN}
+      POS_JWT_SECRET: ${POS_JWT_SECRET}
+      POS_SESSION_HOURS: ${POS_SESSION_HOURS:-12}
 
   frontend:
     build:

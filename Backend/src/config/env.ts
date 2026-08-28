@@ -63,6 +63,9 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .optional()
     .transform((v) => v === "true"),
+  POS_ACCESS_PIN: z.string().min(4).optional(),
+  POS_JWT_SECRET: z.string().min(16).optional(),
+  POS_SESSION_HOURS: z.coerce.number().int().positive().default(12),
 });
 
 const databaseUrl = resolveDatabaseUrl();
@@ -75,4 +78,20 @@ export const env = envSchema.parse({
   API_TOKEN: process.env.API_TOKEN || undefined,
   NODE_ENV: process.env.NODE_ENV,
   POS_SEED_DEMO: process.env.POS_SEED_DEMO,
+  POS_ACCESS_PIN: process.env.POS_ACCESS_PIN || undefined,
+  POS_JWT_SECRET: process.env.POS_JWT_SECRET || undefined,
+  POS_SESSION_HOURS: process.env.POS_SESSION_HOURS,
 });
+
+if (env.NODE_ENV === "production") {
+  if (!env.POS_ACCESS_PIN) {
+    throw new Error(
+      "POS_ACCESS_PIN es obligatorio en producción. Configurá la clave compartida del local.",
+    );
+  }
+  if (!env.POS_JWT_SECRET) {
+    throw new Error(
+      "POS_JWT_SECRET es obligatorio en producción (mín. 16 caracteres).",
+    );
+  }
+}
