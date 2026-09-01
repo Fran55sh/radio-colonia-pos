@@ -181,6 +181,8 @@ function ImportarFacturaWizard() {
               encontrado: true,
               requiere_revision: false,
               codigo_proveedor: item.codigo_proveedor || product.codigo_interno,
+              alicuota_iva: item.alicuota_iva ?? product.alicuota_iva ?? 21,
+              descuento_porcentaje: item.descuento_porcentaje ?? 0,
             }
           : item,
       ),
@@ -385,6 +387,7 @@ function ImportarFacturaWizard() {
             )}
 
             <InvoiceReviewTable
+              mode="import"
               invoice={review}
               onChange={(next) => void saveReview(next)}
               onPickProduct={(idx) => setPickIndex(idx)}

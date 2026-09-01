@@ -197,12 +197,18 @@ function buildItem(input: {
     cantidad: input.cantidad,
     precio_unitario: input.precio_unitario,
     descuento: 0,
+    descuento_porcentaje: 0,
+    alicuota_iva: 21,
     importe: input.importe || input.cantidad * input.precio_unitario,
+    neto_linea: null,
+    iva_linea: null,
+    total_linea: null,
     variant_id: null,
     sku: null,
     producto_nombre: null,
     encontrado: false,
     requiere_revision: true,
+    confirmar_cambio_mapeo: false,
   };
 }
 
@@ -384,6 +390,7 @@ export function parseInvoiceText(text: string): NormalizedInvoice {
       cuit: proveedorCuit,
       razon_social: razonSocial,
       proveedor_id: null,
+      se_creara: false,
     },
     factura: {
       tipo,
@@ -393,6 +400,6 @@ export function parseInvoiceText(text: string): NormalizedInvoice {
       condicion_iva: condicionIva,
     },
     items,
-    totales: { subtotal, iva, total },
+    totales: { subtotal, iva, total, descuento_total: 0, exento: 0 },
   };
 }

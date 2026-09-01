@@ -2,6 +2,7 @@ import { pool, withTransaction } from "../../../config/db.js";
 import type { DbClient } from "../../../config/db.js";
 import { AppError } from "../../../middleware/errors.js";
 import { executeImportacion } from "./execute.js";
+import { applyComputedAmountsToInvoice } from "./invoice-math.js";
 import { parseInvoiceText } from "./invoice-parser.js";
 import { extractPdfTextFromBuffer } from "./pdf-text-extractor.js";
 import {
@@ -11,6 +12,7 @@ import {
 } from "./pdf-storage.js";
 import { matchInvoiceProducts } from "./product-matcher.js";
 import {
+  emptyManualInvoice,
   normalizedInvoiceSchema,
   type NormalizedInvoice,
 } from "./schemas.js";
@@ -21,12 +23,13 @@ import {
 } from "./validation.js";
 
 function mapImportRow(row: Record<string, unknown>) {
-  const review = row.review_json as NormalizedInvoice;
+  const review = applyComputedAmountsToInvoice(row.review_json as NormalizedInvoice);
   const stats = computeMatchStats(review);
   const issues = validateReviewInvoice(review);
   return {
     id: row.id,
     estado: row.estado,
+    origen: (row.origen as string) ?? "pdf",
     proveedor_id: row.proveedor_id,
     pdf_original_name: row.pdf_original_name,
     pdf_size: row.pdf_size,
@@ -42,18 +45,26 @@ function mapImportRow(row: Record<string, unknown>) {
     executed_by: row.executed_by,
     stats,
     validation: {
-      can_execute: !hasCriticalErrors(issues) && row.estado !== "ejecutado" && row.estado !== "cancelado",
+      can_execute:
+        !hasCriticalErrors(issues) &&
+        row.estado !== "ejecutado" &&
+        row.estado !== "cancelado",
       issues,
     },
   };
 }
 
-async function persistExtractedImportacion(importId: number, extracted: NormalizedInvoice) {
+async function persistExtractedImportacion(
+  importId: number,
+  extracted: NormalizedInvoice,
+  origen: "pdf" | "texto" | "manual" = "pdf",
+) {
   const matched = await withTransaction(async (client: DbClient) => {
     return matchInvoiceProducts(client, extracted);
   });
+  const withAmounts = applyComputedAmountsToInvoice(matched);
 
-  const issues = validateReviewInvoice(matched);
+  const issues = validateReviewInvoice(withAmounts);
   const estado = hasCriticalErrors(issues) ? "borrador" : "listo";
 
   const { rows } = await pool.query(
@@ -63,6 +74,7 @@ async function persistExtractedImportacion(importId: number, extracted: Normaliz
          proveedor_id = $4,
          warnings = $5::jsonb,
          estado = $6,
+         origen = $7,
          error_message = NULL,
          updated_at = NOW()
      WHERE id = $1
@@ -70,13 +82,30 @@ async function persistExtractedImportacion(importId: number, extracted: Normaliz
     [
       importId,
       JSON.stringify(extracted),
-      JSON.stringify(matched),
-      matched.proveedor.proveedor_id,
+      JSON.stringify(withAmounts),
+      withAmounts.proveedor.proveedor_id,
       JSON.stringify(issues),
       estado,
+      origen,
     ],
   );
 
+  return mapImportRow(rows[0]);
+}
+
+export async function createImportacionManual() {
+  const draft = emptyManualInvoice();
+  const { rows } = await pool.query(
+    `INSERT INTO pos_compras_importaciones (
+       estado, origen, pdf_storage_key, pdf_original_name, pdf_mime, pdf_size,
+       extracted_json, review_json
+     ) VALUES (
+       'borrador', 'manual', 'manual', 'factura-manual', 'application/json', 0,
+       $1::jsonb, $2::jsonb
+     )
+     RETURNING *`,
+    [JSON.stringify(draft), JSON.stringify(draft)],
+  );
   return mapImportRow(rows[0]);
 }
 
@@ -91,8 +120,8 @@ export async function createImportacionFromText(input: {
 
   const placeholder = await pool.query<{ id: number }>(
     `INSERT INTO pos_compras_importaciones (
-       estado, pdf_storage_key, pdf_original_name, pdf_mime, pdf_size
-     ) VALUES ('borrador', 'text-only', $1, 'text/plain', $2)
+       estado, origen, pdf_storage_key, pdf_original_name, pdf_mime, pdf_size
+     ) VALUES ('borrador', 'texto', 'text-only', $1, 'text/plain', $2)
      RETURNING id`,
     [input.label?.trim() || "texto-manual.txt", Buffer.byteLength(text, "utf8")],
   );
@@ -100,7 +129,7 @@ export async function createImportacionFromText(input: {
 
   try {
     const extracted = parseInvoiceText(text);
-    return await persistExtractedImportacion(importId, extracted);
+    return await persistExtractedImportacion(importId, extracted, "texto");
   } catch (err) {
     const message = err instanceof Error ? err.message : "Error al procesar texto";
     await pool.query(
@@ -124,11 +153,10 @@ export async function createImportacionFromPdf(file: {
     size: file.buffer.length,
   });
 
-  // Placeholder row to get id for storage key
   const placeholder = await pool.query<{ id: number }>(
     `INSERT INTO pos_compras_importaciones (
-       estado, pdf_storage_key, pdf_original_name, pdf_mime, pdf_size
-     ) VALUES ('borrador', 'pending', $1, $2, $3)
+       estado, origen, pdf_storage_key, pdf_original_name, pdf_mime, pdf_size
+     ) VALUES ('borrador', 'pdf', 'pending', $1, $2, $3)
      RETURNING id`,
     [file.filename, file.mimetype || "application/pdf", file.buffer.length],
   );
@@ -143,7 +171,7 @@ export async function createImportacionFromPdf(file: {
 
     const text = await extractPdfTextFromBuffer(file.buffer);
     const extracted = parseInvoiceText(text);
-    return await persistExtractedImportacion(importId, extracted);
+    return await persistExtractedImportacion(importId, extracted, "pdf");
   } catch (err) {
     const message = err instanceof Error ? err.message : "Error al procesar PDF";
     await pool.query(
@@ -191,7 +219,49 @@ export async function updateImportacionReview(
     throw new AppError(409, "IMMUTABLE", "No se puede editar una importación cerrada");
   }
 
-  const issues = validateReviewInvoice(parsed);
+  const matched = await withTransaction(async (client: DbClient) => {
+    return matchInvoiceProducts(client, parsed);
+  });
+  // Conservar vinculaciones manuales del cliente si el matcher no encontró match
+  const merged: NormalizedInvoice = {
+    ...matched,
+    items: matched.items.map((item, i) => {
+      const fromClient = parsed.items[i];
+      if (!fromClient) return item;
+      if (item.variant_id) return item;
+      if (fromClient.variant_id) {
+        return {
+          ...item,
+          variant_id: fromClient.variant_id,
+          sku: fromClient.sku,
+          producto_nombre: fromClient.producto_nombre,
+          encontrado: true,
+          requiere_revision: false,
+          confirmar_cambio_mapeo: fromClient.confirmar_cambio_mapeo,
+        };
+      }
+      return {
+        ...item,
+        confirmar_cambio_mapeo: fromClient.confirmar_cambio_mapeo,
+      };
+    }),
+    totales: {
+      ...matched.totales,
+      descuento_total: parsed.totales.descuento_total ?? 0,
+    },
+    factura: parsed.factura,
+    proveedor: {
+      ...matched.proveedor,
+      cuit: parsed.proveedor.cuit ?? matched.proveedor.cuit,
+      razon_social:
+        matched.proveedor.proveedor_id != null
+          ? matched.proveedor.razon_social
+          : parsed.proveedor.razon_social ?? matched.proveedor.razon_social,
+    },
+  };
+
+  const withAmounts = applyComputedAmountsToInvoice(merged);
+  const issues = validateReviewInvoice(withAmounts);
   const estado = hasCriticalErrors(issues) ? "borrador" : "listo";
 
   const { rows } = await pool.query(
@@ -205,8 +275,8 @@ export async function updateImportacionReview(
      RETURNING *`,
     [
       id,
-      JSON.stringify(parsed),
-      parsed.proveedor.proveedor_id,
+      JSON.stringify(withAmounts),
+      withAmounts.proveedor.proveedor_id,
       JSON.stringify(issues),
       estado,
     ],

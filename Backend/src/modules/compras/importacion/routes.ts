@@ -5,6 +5,7 @@ import {
   cancelImportacion,
   createImportacionFromPdf,
   createImportacionFromText,
+  createImportacionManual,
   executeImportacion,
   getImportacion,
   listImportaciones,
@@ -35,6 +36,11 @@ export async function importacionRoutes(app: FastifyInstance) {
   app.post("/texto", async (request, reply) => {
     const body = createImportacionTextSchema.parse(request.body);
     const result = await createImportacionFromText(body);
+    return reply.status(201).send(result);
+  });
+
+  app.post("/manual", async (_request, reply) => {
+    const result = await createImportacionManual();
     return reply.status(201).send(result);
   });
 

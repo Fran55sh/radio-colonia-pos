@@ -129,6 +129,7 @@ describe("validateReviewInvoice", () => {
       cuit: "30712345678",
       razon_social: "Demo",
       proveedor_id: "11111111-1111-1111-1111-111111111111",
+      se_creara: false,
     },
     factura: {
       tipo: "A",
@@ -143,15 +144,21 @@ describe("validateReviewInvoice", () => {
         cantidad: 2,
         precio_unitario: 100,
         descuento: 0,
+        descuento_porcentaje: 0,
+        alicuota_iva: 21,
         importe: 200,
+        neto_linea: 200,
+        iva_linea: 42,
+        total_linea: 242,
         variant_id: "22222222-2222-2222-2222-222222222222",
         sku: "abc",
         producto_nombre: "Test",
         encontrado: true,
         requiere_revision: false,
+        confirmar_cambio_mapeo: false,
       },
     ],
-    totales: { subtotal: 200, iva: 42, total: 242 },
+    totales: { subtotal: 200, iva: 42, total: 242, descuento_total: 0, exento: 0 },
   });
 
   it("passes a complete invoice", () => {
@@ -161,8 +168,8 @@ describe("validateReviewInvoice", () => {
 
   it("flags missing product as error", () => {
     const inv = base();
-    inv.items[0].variant_id = null;
-    inv.items[0].encontrado = false;
+    inv.items[0]!.variant_id = null;
+    inv.items[0]!.encontrado = false;
     const issues = validateReviewInvoice(inv);
     expect(hasCriticalErrors(issues)).toBe(true);
     expect(issues.some((i) => i.code === "PRODUCTO_SIN_MATCH")).toBe(true);
@@ -170,7 +177,7 @@ describe("validateReviewInvoice", () => {
 
   it("warns on line importe mismatch", () => {
     const inv = base();
-    inv.items[0].importe = 999;
+    inv.items[0]!.importe = 999;
     const issues = validateReviewInvoice(inv);
     expect(issues.some((i) => i.code === "IMPORTE_LINEA" && i.level === "warning")).toBe(
       true,

@@ -252,12 +252,18 @@ export type NormalizedInvoiceItem = {
   cantidad: number;
   precio_unitario: number;
   descuento: number;
+  descuento_porcentaje?: number;
+  alicuota_iva?: number;
   importe: number;
+  neto_linea?: number | null;
+  iva_linea?: number | null;
+  total_linea?: number | null;
   variant_id: string | null;
   sku: string | null;
   producto_nombre: string | null;
   encontrado: boolean;
   requiere_revision: boolean;
+  confirmar_cambio_mapeo?: boolean;
 };
 
 export type NormalizedInvoice = {
@@ -265,6 +271,7 @@ export type NormalizedInvoice = {
     cuit: string | null;
     razon_social: string | null;
     proveedor_id: string | null;
+    se_creara?: boolean;
   };
   factura: {
     tipo: string | null;
@@ -278,6 +285,8 @@ export type NormalizedInvoice = {
     subtotal: number | null;
     iva: number | null;
     total: number | null;
+    descuento_total?: number | null;
+    exento?: number | null;
   };
 };
 
@@ -291,6 +300,7 @@ export type ImportacionValidationIssue = {
 export type CompraImportacion = {
   id: number;
   estado: string;
+  origen?: string;
   proveedor_id: string | null;
   proveedor_nombre?: string | null;
   pdf_original_name: string | null;
@@ -321,6 +331,7 @@ export type EjecutarImportacionResult = {
   orden_id: number;
   factura_id: number;
   items_procesados: number;
+  proveedor_creado?: boolean;
 };
 
 export type OrdenCompraListItem = {
@@ -374,6 +385,13 @@ export async function uploadFacturaTexto(input: {
   return apiFetch<CompraImportacion>("/compras/importaciones/texto", {
     method: "POST",
     body: JSON.stringify(input),
+  });
+}
+
+export async function createImportacionManual(): Promise<CompraImportacion> {
+  return apiFetch<CompraImportacion>("/compras/importaciones/manual", {
+    method: "POST",
+    body: JSON.stringify({}),
   });
 }
 

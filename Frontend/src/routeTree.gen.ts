@@ -13,6 +13,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ComprasIndexRouteImport } from './routes/compras/index'
 import { Route as ComprasImportarRouteImport } from './routes/compras/importar'
+import { Route as ComprasFacturasNuevaRouteImport } from './routes/compras/facturas/nueva'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -34,18 +35,25 @@ const ComprasImportarRoute = ComprasImportarRouteImport.update({
   path: '/compras/importar',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ComprasFacturasNuevaRoute = ComprasFacturasNuevaRouteImport.update({
+  id: '/compras/facturas/nueva',
+  path: '/compras/facturas/nueva',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/compras/importar': typeof ComprasImportarRoute
   '/compras/': typeof ComprasIndexRoute
+  '/compras/facturas/nueva': typeof ComprasFacturasNuevaRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/compras/importar': typeof ComprasImportarRoute
   '/compras': typeof ComprasIndexRoute
+  '/compras/facturas/nueva': typeof ComprasFacturasNuevaRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,30 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/compras/importar': typeof ComprasImportarRoute
   '/compras/': typeof ComprasIndexRoute
+  '/compras/facturas/nueva': typeof ComprasFacturasNuevaRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/compras/importar' | '/compras/'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/compras/importar'
+    | '/compras/'
+    | '/compras/facturas/nueva'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/compras/importar' | '/compras'
-  id: '__root__' | '/' | '/login' | '/compras/importar' | '/compras/'
+  to:
+    | '/'
+    | '/login'
+    | '/compras/importar'
+    | '/compras'
+    | '/compras/facturas/nueva'
+  id:
+    | '__root__'
+    | '/'
+    | '/login'
+    | '/compras/importar'
+    | '/compras/'
+    | '/compras/facturas/nueva'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +92,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   ComprasImportarRoute: typeof ComprasImportarRoute
   ComprasIndexRoute: typeof ComprasIndexRoute
+  ComprasFacturasNuevaRoute: typeof ComprasFacturasNuevaRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -99,6 +125,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ComprasImportarRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/compras/facturas/nueva': {
+      id: '/compras/facturas/nueva'
+      path: '/compras/facturas/nueva'
+      fullPath: '/compras/facturas/nueva'
+      preLoaderRoute: typeof ComprasFacturasNuevaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -107,6 +140,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   ComprasImportarRoute: ComprasImportarRoute,
   ComprasIndexRoute: ComprasIndexRoute,
+  ComprasFacturasNuevaRoute: ComprasFacturasNuevaRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

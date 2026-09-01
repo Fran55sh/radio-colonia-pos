@@ -1,6 +1,6 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { FileUp, ArrowLeft } from "lucide-react";
+import { FileUp, ArrowLeft, FilePlus2 } from "lucide-react";
 import {
   fetchAuthConfig,
   fetchImportaciones,
@@ -27,6 +27,12 @@ export const Route = createFileRoute("/compras/")({
   head: () => ({ meta: [{ title: "Compras — Radio Colonia" }] }),
 });
 
+function origenLabel(origen?: string) {
+  if (origen === "manual") return "Manual";
+  if (origen === "texto") return "Texto";
+  return "PDF";
+}
+
 function ComprasHome() {
   const importsQ = useQuery({
     queryKey: ["compras-importaciones"],
@@ -48,15 +54,30 @@ function ComprasHome() {
           Caja
         </Link>
         <div className="flex-1 text-sm font-semibold text-silver-light">Compras</div>
+        <Button asChild variant="outline" className="border-border gap-2 hidden sm:inline-flex">
+          <Link to="/compras/facturas/nueva">
+            <FilePlus2 className="size-4" />
+            Nueva factura manual
+          </Link>
+        </Button>
         <Button asChild className="bg-primary text-primary-foreground hover:bg-accent gap-2">
           <Link to="/compras/importar">
             <FileUp className="size-4" />
-            Importar factura PDF
+            Importar factura
           </Link>
         </Button>
       </header>
 
       <main className="flex-1 overflow-auto p-4 sm:p-6 space-y-8 max-w-5xl mx-auto w-full">
+        <div className="sm:hidden">
+          <Button asChild variant="outline" className="w-full border-border gap-2">
+            <Link to="/compras/facturas/nueva">
+              <FilePlus2 className="size-4" />
+              Nueva factura manual
+            </Link>
+          </Button>
+        </div>
+
         <section>
           <h2 className="text-xs uppercase tracking-widest text-silver font-bold mb-3">
             Importaciones recientes
@@ -65,25 +86,31 @@ function ComprasHome() {
             {(importsQ.data ?? []).length === 0 && (
               <p className="p-4 text-sm text-silver">Todavía no hay importaciones.</p>
             )}
-            {(importsQ.data ?? []).map((imp) => (
-              <Link
-                key={imp.id}
-                to="/compras/importar"
-                search={{ id: String(imp.id) }}
-                className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-charcoal/60"
-              >
-                <div className="min-w-0">
-                  <div className="text-sm text-silver-light truncate">
-                    #{imp.id} · {imp.pdf_original_name ?? "PDF"}
+            {(importsQ.data ?? []).map((imp) => {
+              const dest =
+                imp.origen === "manual"
+                  ? ({ to: "/compras/facturas/nueva" as const, search: { id: String(imp.id) } })
+                  : ({ to: "/compras/importar" as const, search: { id: String(imp.id) } });
+              return (
+                <Link
+                  key={imp.id}
+                  {...dest}
+                  className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-charcoal/60"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm text-silver-light truncate">
+                      #{imp.id} · {origenLabel(imp.origen)} ·{" "}
+                      {imp.pdf_original_name ?? "factura"}
+                    </div>
+                    <div className="text-[11px] text-silver">
+                      {imp.proveedor_nombre ?? "Sin proveedor"} · {imp.stats.matched_items}/
+                      {imp.stats.total_items} productos · {imp.estado}
+                    </div>
                   </div>
-                  <div className="text-[11px] text-silver">
-                    {imp.proveedor_nombre ?? "Sin proveedor"} · {imp.stats.matched_items}/
-                    {imp.stats.total_items} productos · {imp.estado}
-                  </div>
-                </div>
-                <span className="text-[11px] text-primary shrink-0">Abrir</span>
-              </Link>
-            ))}
+                  <span className="text-[11px] text-primary shrink-0">Abrir</span>
+                </Link>
+              );
+            })}
           </div>
         </section>
 
