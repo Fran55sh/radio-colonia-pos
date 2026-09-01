@@ -4,6 +4,7 @@ import { normalizeTiers } from "./quantity-pricing";
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api/v1";
 
 export type ProductoCaja = {
+  variant_id?: string;
   codigo_interno: string;
   nombre: string;
   precio_venta: number;
@@ -241,4 +242,169 @@ export async function checkApiConnection(): Promise<ApiConnectionStatus> {
 export async function checkApiHealth(): Promise<boolean> {
   const s = await checkApiConnection();
   return s.online;
+}
+
+/* —— Compras / importación factura PDF —— */
+
+export type NormalizedInvoiceItem = {
+  codigo_proveedor: string | null;
+  descripcion: string;
+  cantidad: number;
+  precio_unitario: number;
+  descuento: number;
+  importe: number;
+  variant_id: string | null;
+  sku: string | null;
+  producto_nombre: string | null;
+  encontrado: boolean;
+  requiere_revision: boolean;
+};
+
+export type NormalizedInvoice = {
+  proveedor: {
+    cuit: string | null;
+    razon_social: string | null;
+    proveedor_id: string | null;
+  };
+  factura: {
+    tipo: string | null;
+    punto_venta: string | null;
+    numero: string | null;
+    fecha: string | null;
+    condicion_iva?: string | null;
+  };
+  items: NormalizedInvoiceItem[];
+  totales: {
+    subtotal: number | null;
+    iva: number | null;
+    total: number | null;
+  };
+};
+
+export type ImportacionValidationIssue = {
+  level: "error" | "warning";
+  code: string;
+  message: string;
+  item_index?: number;
+};
+
+export type CompraImportacion = {
+  id: number;
+  estado: string;
+  proveedor_id: string | null;
+  proveedor_nombre?: string | null;
+  pdf_original_name: string | null;
+  pdf_size: number | null;
+  extracted_json: NormalizedInvoice;
+  review_json: NormalizedInvoice;
+  warnings: unknown;
+  error_message: string | null;
+  orden_id: number | null;
+  factura_id: number | null;
+  created_at: string;
+  updated_at: string;
+  executed_at: string | null;
+  executed_by: string | null;
+  stats: {
+    total_items: number;
+    matched_items: number;
+    pending_items: number;
+  };
+  validation: {
+    can_execute: boolean;
+    issues: ImportacionValidationIssue[];
+  };
+};
+
+export type EjecutarImportacionResult = {
+  importacion_id: number;
+  orden_id: number;
+  factura_id: number;
+  items_procesados: number;
+};
+
+export type OrdenCompraListItem = {
+  id: number;
+  estado: string;
+  origen: string;
+  observaciones: string | null;
+  created_at: string;
+  recibido_at: string | null;
+  proveedor_nombre: string;
+  lineas_count: number;
+};
+
+async function apiFetchFormData<T>(path: string, form: FormData): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers,
+    body: form,
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  if (res.status === 401) {
+    handleUnauthorized();
+    throw new Error((data as { message?: string }).message ?? "Sesión expirada");
+  }
+  if (!res.ok) {
+    throw new Error(
+      (data as { message?: string }).message ??
+        (data as { error?: string }).error ??
+        `Error HTTP ${res.status}`,
+    );
+  }
+  return data as T;
+}
+
+export async function uploadFacturaPdf(file: File): Promise<CompraImportacion> {
+  const form = new FormData();
+  form.append("file", file);
+  return apiFetchFormData<CompraImportacion>("/compras/importaciones", form);
+}
+
+export async function fetchImportaciones(): Promise<CompraImportacion[]> {
+  const data = await apiFetch<{ importaciones: CompraImportacion[] }>(
+    "/compras/importaciones",
+  );
+  return data.importaciones;
+}
+
+export async function fetchImportacion(id: number): Promise<CompraImportacion> {
+  return apiFetch<CompraImportacion>(`/compras/importaciones/${id}`);
+}
+
+export async function patchImportacionReview(
+  id: number,
+  review_json: NormalizedInvoice,
+): Promise<CompraImportacion> {
+  return apiFetch<CompraImportacion>(`/compras/importaciones/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ review_json }),
+  });
+}
+
+export async function ejecutarImportacion(
+  id: number,
+): Promise<EjecutarImportacionResult> {
+  return apiFetch<EjecutarImportacionResult>(`/compras/importaciones/${id}/ejecutar`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function cancelarImportacion(id: number): Promise<CompraImportacion> {
+  return apiFetch<CompraImportacion>(`/compras/importaciones/${id}/cancelar`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function fetchOrdenesCompra(): Promise<OrdenCompraListItem[]> {
+  const data = await apiFetch<{ ordenes: OrdenCompraListItem[] }>("/compras/ordenes");
+  return data.ordenes;
 }

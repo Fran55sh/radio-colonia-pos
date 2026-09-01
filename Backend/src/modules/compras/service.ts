@@ -10,7 +10,7 @@ type CreateOrdenInput = z.infer<typeof createOrdenCompraSchema>;
 
 export async function listProveedores() {
   const { rows } = await pool.query(
-    `SELECT id, name AS razon_social, slug, email, phone AS telefono, notes AS notas, is_active AS activo
+    `SELECT id, name AS razon_social, slug, email, phone AS telefono, notes AS notas, cuit, is_active AS activo
      FROM suppliers
      WHERE is_active = TRUE
      ORDER BY name`,
@@ -26,12 +26,20 @@ export async function createProveedor(data: {
   telefono?: string;
 }) {
   const baseSlug = data.slug ?? slugify(data.razon_social);
-  const notes = data.cuit ? `CUIT: ${data.cuit}` : null;
+  const cuitDigits = data.cuit?.replace(/\D/g, "") || null;
+  const notes = cuitDigits ? `CUIT: ${cuitDigits}` : null;
   const { rows } = await pool.query(
-    `INSERT INTO suppliers (name, slug, email, phone, notes, is_active)
-     VALUES ($1, $2, $3, $4, $5, TRUE)
-     RETURNING id, name AS razon_social, slug, email, phone AS telefono, is_active AS activo`,
-    [data.razon_social, baseSlug, data.email || null, data.telefono ?? null, notes],
+    `INSERT INTO suppliers (name, slug, email, phone, notes, cuit, is_active)
+     VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+     RETURNING id, name AS razon_social, slug, email, phone AS telefono, cuit, is_active AS activo`,
+    [
+      data.razon_social,
+      baseSlug,
+      data.email || null,
+      data.telefono ?? null,
+      notes,
+      cuitDigits,
+    ],
   );
   return rows[0];
 }
@@ -163,4 +171,18 @@ export async function getOrdenCompra(ordenId: number) {
   );
 
   return { ...orden.rows[0], lineas: lineas.rows };
+}
+
+export async function listOrdenesCompra(limit = 50) {
+  const { rows } = await pool.query(
+    `SELECT oc.id, oc.estado, oc.origen, oc.observaciones, oc.created_at, oc.recibido_at, oc.recibido_por,
+            s.name AS proveedor_nombre, s.id AS proveedor_id,
+            (SELECT COUNT(*)::int FROM pos_ordenes_compra_lineas l WHERE l.orden_id = oc.id) AS lineas_count
+     FROM pos_ordenes_compra oc
+     JOIN suppliers s ON s.id = oc.proveedor_id
+     ORDER BY oc.created_at DESC
+     LIMIT $1`,
+    [limit],
+  );
+  return rows;
 }

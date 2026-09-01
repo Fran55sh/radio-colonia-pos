@@ -32,6 +32,7 @@ export function formatPosProductName(
 }
 
 export type ProductoCaja = {
+  variant_id: string;
   codigo_interno: string;
   nombre: string;
   precio_venta: number;
@@ -104,6 +105,7 @@ const LIST_CATALOG_SELECT = `
 
 export async function listCatalogForPos(client: DbClient): Promise<ProductoCaja[]> {
   const { rows } = await client.query<{
+    variant_id: string;
     sku: string;
     product_name: string;
     attributes: Record<string, string>;
@@ -114,9 +116,10 @@ export async function listCatalogForPos(client: DbClient): Promise<ProductoCaja[
     variant_price_tiers: unknown;
   }>(
     `${LIST_CATALOG_SELECT}
-     ORDER BY p.name, pv.sku`,
+     ORDER BY p.name, pv.sort_order, pv.sku`,
   );
   return rows.map((r) => ({
+    variant_id: r.variant_id,
     codigo_interno: r.sku,
     nombre: formatPosProductName(r.product_name, r.attributes),
     precio_venta: r.precio_venta,
@@ -251,4 +254,35 @@ export async function getVariantIdBySku(
     [normalized],
   );
   return rows[0] ?? null;
+}
+
+/** Incrementa stock de venta al recibir mercadería (compras). */
+export async function lockAndIncrementForPurchase(
+  client: DbClient,
+  variantId: string,
+  quantity: number,
+  costUnitario?: number,
+): Promise<{ variant_id: string; sku: string; stock: number }> {
+  if (quantity <= 0) {
+    throw new AppError(400, "INVALID_QTY", "La cantidad a ingresar debe ser > 0");
+  }
+
+  const { rows } = await client.query<{
+    variant_id: string;
+    sku: string;
+    stock: number;
+  }>(
+    `UPDATE product_variants
+     SET stock = stock + $1,
+         cost_price = COALESCE($3::numeric, cost_price),
+         updated_at = NOW()
+     WHERE id = $2
+     RETURNING id AS variant_id, sku, stock`,
+    [quantity, variantId, costUnitario != null ? costUnitario.toFixed(2) : null],
+  );
+
+  if (rows.length === 0) {
+    throw new AppError(404, "VARIANT_NOT_FOUND", `Variante no encontrada: ${variantId}`);
+  }
+  return rows[0];
 }

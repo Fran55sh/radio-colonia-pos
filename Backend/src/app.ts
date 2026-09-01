@@ -1,4 +1,5 @@
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import Fastify from "fastify";
 import { checkDbConnection, pool } from "./config/db.js";
 import {
@@ -18,6 +19,7 @@ import { comprasRoutes } from "./modules/compras/routes.js";
 import { contabilidadRoutes } from "./modules/contabilidad/routes.js";
 import { fiscalRoutes } from "./modules/fiscal/routes.js";
 import { posRoutes } from "./modules/pos/routes.js";
+import { ensurePdfStorageDir } from "./modules/compras/importacion/pdf-storage.js";
 
 const healthCache = {
   checkedAt: 0,
@@ -40,6 +42,12 @@ export async function buildApp() {
     origin: env.CORS_ORIGIN.split(",").map((o) => o.trim()),
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
   });
+
+  await app.register(multipart, {
+    limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  });
+
+  await ensurePdfStorageDir();
 
   app.addHook("preHandler", requireAuth);
   app.setErrorHandler(errorHandler);

@@ -66,6 +66,7 @@ const envSchema = z.object({
   POS_ACCESS_PIN: z.string().min(4).optional(),
   POS_JWT_SECRET: z.string().min(16).optional(),
   POS_SESSION_HOURS: z.coerce.number().int().positive().default(12),
+  COMPRAS_PDF_DIR: z.string().default("./data/compras-pdfs"),
 });
 
 const databaseUrl = resolveDatabaseUrl();
@@ -81,6 +82,7 @@ export const env = envSchema.parse({
   POS_ACCESS_PIN: process.env.POS_ACCESS_PIN || undefined,
   POS_JWT_SECRET: process.env.POS_JWT_SECRET || undefined,
   POS_SESSION_HOURS: process.env.POS_SESSION_HOURS,
+  COMPRAS_PDF_DIR: process.env.COMPRAS_PDF_DIR,
 });
 
 if (env.NODE_ENV === "production") {
