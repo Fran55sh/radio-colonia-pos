@@ -1,9 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { AppError } from "../../../middleware/errors.js";
-import { patchImportacionSchema } from "./schemas.js";
+import { createImportacionTextSchema, patchImportacionSchema } from "./schemas.js";
 import {
   cancelImportacion,
   createImportacionFromPdf,
+  createImportacionFromText,
   executeImportacion,
   getImportacion,
   listImportaciones,
@@ -28,6 +29,12 @@ export async function importacionRoutes(app: FastifyInstance) {
       mimetype: file.mimetype,
       buffer,
     });
+    return reply.status(201).send(result);
+  });
+
+  app.post("/texto", async (request, reply) => {
+    const body = createImportacionTextSchema.parse(request.body);
+    const result = await createImportacionFromText(body);
     return reply.status(201).send(result);
   });
 

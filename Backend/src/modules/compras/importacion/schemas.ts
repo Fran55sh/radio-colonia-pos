@@ -43,4 +43,9 @@ export const patchImportacionSchema = z.object({
   review_json: normalizedInvoiceSchema,
 });
 
+export const createImportacionTextSchema = z.object({
+  text: z.string().min(20, "El texto es demasiado corto"),
+  label: z.string().max(200).optional(),
+});
+
 export const ROUNDING_TOLERANCE = 0.05;

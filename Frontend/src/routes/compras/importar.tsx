@@ -11,6 +11,7 @@ import {
   fetchImportacion,
   patchImportacionReview,
   uploadFacturaPdf,
+  uploadFacturaTexto,
   type CompraImportacion,
   type EjecutarImportacionResult,
   type NormalizedInvoice,
@@ -19,6 +20,7 @@ import {
 import { isAuthenticated, setAuthRequired } from "@/lib/auth-session";
 
 type WizardStep = "upload" | "processing" | "review" | "done";
+type UploadMode = "pdf" | "text";
 
 export const Route = createFileRoute("/compras/importar")({
   validateSearch: (search: Record<string, unknown>): { id?: string } => ({
@@ -45,7 +47,9 @@ function ImportarFacturaWizard() {
   const navigate = useNavigate();
   const { id: searchId } = Route.useSearch();
   const [step, setStep] = useState<WizardStep>("upload");
+  const [uploadMode, setUploadMode] = useState<UploadMode>("pdf");
   const [file, setFile] = useState<File | null>(null);
+  const [pastedText, setPastedText] = useState("");
   const [importacion, setImportacion] = useState<CompraImportacion | null>(null);
   const [review, setReview] = useState<NormalizedInvoice | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -83,17 +87,11 @@ function ImportarFacturaWizard() {
     })();
   }, [searchId]);
 
-  const processFile = useCallback(async () => {
-    if (!file) return;
-    setError(null);
-    setStep("processing");
-    setStatusLines(["Leyendo PDF…"]);
-    try {
-      setStatusLines((s) => [...s, "Extrayendo datos de factura…"]);
-      const data = await uploadFacturaPdf(file);
+  const finishImport = useCallback(
+    async (data: CompraImportacion, sourceLabel: string) => {
       setStatusLines((s) => [
         ...s,
-        "✓ PDF leído",
+        `✓ ${sourceLabel}`,
         data.proveedor_id || data.review_json.proveedor.cuit
           ? "✓ Datos de proveedor encontrados"
           : "⚠ Proveedor requiere revisión",
@@ -111,11 +109,43 @@ function ImportarFacturaWizard() {
         replace: true,
       });
       setTimeout(() => setStep("review"), 600);
+    },
+    [navigate],
+  );
+
+  const processFile = useCallback(async () => {
+    if (!file) return;
+    setError(null);
+    setStep("processing");
+    setStatusLines(["Leyendo PDF…"]);
+    try {
+      setStatusLines((s) => [...s, "Extrayendo datos de factura…"]);
+      const data = await uploadFacturaPdf(file);
+      await finishImport(data, "PDF leído");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al procesar el PDF");
+      setUploadMode("text");
       setStep("upload");
     }
-  }, [file, navigate]);
+  }, [file, finishImport]);
+
+  const processText = useCallback(async () => {
+    const text = pastedText.trim();
+    if (text.length < 20) {
+      setError("Pegá al menos unas líneas de la factura (CUIT, ítems, totales).");
+      return;
+    }
+    setError(null);
+    setStep("processing");
+    setStatusLines(["Procesando texto pegado…"]);
+    try {
+      const data = await uploadFacturaTexto({ text, label: file?.name ?? "texto-manual.txt" });
+      await finishImport(data, "Texto procesado");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al procesar el texto");
+      setStep("upload");
+    }
+  }, [file?.name, finishImport, pastedText]);
 
   const saveReview = async (next: NormalizedInvoice) => {
     setReview(next);
@@ -219,24 +249,77 @@ function ImportarFacturaWizard() {
         {step === "upload" && (
           <div className="rounded-xl border border-border bg-charcoal/40 p-6 space-y-4">
             <h1 className="text-lg font-semibold text-silver-light">Nueva carga de factura</h1>
-            <p className="text-sm text-silver">
-              Seleccioná un PDF de factura electrónica (con texto seleccionable). No se usa OCR/IA
-              en este MVP.
-            </p>
-            <input
-              type="file"
-              accept="application/pdf,.pdf"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm text-silver file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-primary file:text-primary-foreground"
-            />
-            <Button
-              disabled={!file}
-              onClick={() => void processFile()}
-              className="bg-primary text-primary-foreground gap-2"
-            >
-              <Upload className="size-4" />
-              Procesar factura
-            </Button>
+
+            <div className="flex gap-2 border-b border-border pb-3">
+              <button
+                type="button"
+                onClick={() => setUploadMode("pdf")}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  uploadMode === "pdf"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-silver hover:text-silver-light hover:bg-charcoal"
+                }`}
+              >
+                Subir PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => setUploadMode("text")}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  uploadMode === "text"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-silver hover:text-silver-light hover:bg-charcoal"
+                }`}
+              >
+                Pegar texto
+              </button>
+            </div>
+
+            {uploadMode === "pdf" ? (
+              <>
+                <p className="text-sm text-silver">
+                  Subí el PDF de la factura electrónica. Si el PDF no se puede leer automáticamente,
+                  podés cambiar a &quot;Pegar texto&quot; y usar el texto que extraigas (ej. con Gemini).
+                </p>
+                <input
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  className="block w-full text-sm text-silver file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-primary file:text-primary-foreground"
+                />
+                <Button
+                  disabled={!file}
+                  onClick={() => void processFile()}
+                  className="bg-primary text-primary-foreground gap-2"
+                >
+                  <Upload className="size-4" />
+                  Procesar factura
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-silver">
+                  Pegá el texto completo de la factura (CUIT, ítems, totales). Podés copiarlo desde
+                  Gemini u otro lector si el PDF no se procesa solo.
+                </p>
+                <textarea
+                  value={pastedText}
+                  onChange={(e) => setPastedText(e.target.value)}
+                  rows={14}
+                  placeholder={
+                    "FACTURA A\nCUIT: 30-12345678-9\nRazón Social: ...\nComprobante: 0001-00001234\n..."
+                  }
+                  className="w-full rounded-md border border-border bg-midnight px-3 py-2 text-sm text-silver-light placeholder:text-silver/60 focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <Button
+                  disabled={pastedText.trim().length < 20}
+                  onClick={() => void processText()}
+                  className="bg-primary text-primary-foreground gap-2"
+                >
+                  Procesar texto
+                </Button>
+              </>
+            )}
           </div>
         )}
 

@@ -2,10 +2,12 @@ import { readFile } from "fs/promises";
 import { createRequire } from "module";
 import path from "path";
 import { pathToFileURL } from "url";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { DocumentInitParameters } from "pdfjs-dist/types/src/display/api.js";
 import { PasswordException, PDFParse, type LoadParameters } from "pdf-parse";
 import { AppError } from "../../../middleware/errors.js";
+import { extractWithGemini, isGeminiExtractionEnabled } from "./pdf-gemini.js";
+import { extractWithPdftotext } from "./pdf-poppler.js";
 
 const require = createRequire(import.meta.url);
 type LegacyPdfParse = (
@@ -14,12 +16,19 @@ type LegacyPdfParse = (
 ) => Promise<{ text?: string }>;
 const legacyPdfParse = require("legacy-pdf-parse/lib/pdf-parse.js") as LegacyPdfParse;
 
+const pdfjsRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
+GlobalWorkerOptions.workerSrc = pathToFileURL(
+  path.join(pdfjsRoot, "legacy/build/pdf.worker.mjs"),
+).href;
+
 const MIN_TEXT_LEN = 20;
 
 const MSG_NO_TEXT =
-  "No pudimos extraer texto del PDF con los parsers locales.\n\n" +
-  "Si podés seleccionar texto en el visor, puede ser un formato AFIP/XFA o fuentes especiales.\n" +
-  "Probá re-exportar/descargar de nuevo el comprobante desde AFIP/ARCA o el mail original del proveedor.";
+  "No pudimos extraer suficiente texto del PDF con parsers locales.\n\n" +
+  "Este PDF parece tener poco texto embebido (solo metadatos). Probá:\n" +
+  "1) Pegar el texto de la factura (botón abajo), o\n" +
+  "2) Configurar COMPRAS_GEMINI_API_KEY en el backend, o\n" +
+  "3) Descargar de nuevo el comprobante desde AFIP/ARCA.";
 
 const MSG_PASSWORD =
   "El PDF está protegido con contraseña.\n\n" +
@@ -33,7 +42,6 @@ function pdfJsResourceUrls(): Pick<
   DocumentInitParameters,
   "standardFontDataUrl" | "cMapUrl" | "cMapPacked"
 > {
-  const pdfjsRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
   return {
     standardFontDataUrl: pathToFileURL(path.join(pdfjsRoot, "standard_fonts/")).href,
     cMapUrl: pathToFileURL(path.join(pdfjsRoot, "cmaps/")).href,
@@ -47,6 +55,10 @@ function scoreText(text: string): number {
   return trimmed.replace(/[^\p{L}\p{N}]/gu, "").length;
 }
 
+function previewText(text: string): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
 function normalizeExtractedText(result: {
   text?: string;
   pages?: Array<{ text?: string }>;
@@ -56,6 +68,26 @@ function normalizeExtractedText(result: {
     .filter(Boolean)
     .join("\n\n");
   return (result.text ?? "").trim() || fromPages.trim();
+}
+
+function tableResultToText(result: {
+  pages?: Array<{ tables?: Array<Array<Array<string>>> }>;
+  mergedTables?: Array<Array<Array<string>>>;
+}): string {
+  const chunks: string[] = [];
+  for (const page of result.pages ?? []) {
+    for (const table of page.tables ?? []) {
+      for (const row of table) {
+        chunks.push(row.join(" | "));
+      }
+    }
+  }
+  for (const table of result.mergedTables ?? []) {
+    for (const row of table) {
+      chunks.push(row.join(" | "));
+    }
+  }
+  return chunks.join("\n").trim();
 }
 
 function collectStrings(value: unknown, out: string[]): void {
@@ -89,6 +121,16 @@ async function extractWithPdfParse(
   }
 }
 
+async function extractWithPdfParseTable(buffer: Buffer, load: LoadParameters): Promise<string> {
+  const parser = new PDFParse({ ...load, data: new Uint8Array(buffer) });
+  try {
+    const result = await parser.getTable();
+    return tableResultToText(result);
+  } finally {
+    await parser.destroy().catch(() => undefined);
+  }
+}
+
 async function extractWithPdfJsDirect(
   buffer: Buffer,
   load: DocumentInitParameters,
@@ -97,27 +139,32 @@ async function extractWithPdfJsDirect(
     ...pdfJsResourceUrls(),
     ...load,
     data: new Uint8Array(buffer),
+    isEvalSupported: false,
   });
 
   const doc = await loadingTask.promise;
   const chunks: string[] = [];
 
   try {
+    if (doc.allXfaHtml) collectStrings(doc.allXfaHtml, chunks);
+
     const fields = await doc.getFieldObjects().catch(() => null);
     if (fields) {
       for (const [fieldName, entries] of Object.entries(fields)) {
         const values: string[] = [];
         collectStrings(entries, values);
-        if (values.length > 0) {
-          chunks.push(`${fieldName}: ${values.join(" ")}`);
-        } else {
-          chunks.push(fieldName);
-        }
+        if (values.length > 0) chunks.push(`${fieldName}: ${values.join(" ")}`);
       }
     }
 
     for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
       const page = await doc.getPage(pageNumber);
+      const annotations = await page.getAnnotations({ intent: "display" }).catch(() => []);
+      for (const annotation of annotations) {
+        const overlaid = (annotation as { overlaidText?: string }).overlaidText;
+        if (overlaid?.trim()) chunks.push(overlaid.trim());
+      }
+
       for (const disableNormalization of [false, true] as const) {
         const textContent = await page.getTextContent({
           includeMarkedContent: true,
@@ -157,59 +204,32 @@ function isPasswordError(err: unknown): boolean {
 }
 
 async function runExtractionStrategies(buffer: Buffer): Promise<{ text: string; strategy: string } | null> {
+  const xfaLoad: LoadParameters = {
+    enableXfa: true,
+    useSystemFonts: true,
+    useWorkerFetch: false,
+    ...pdfJsResourceUrls(),
+  };
+
   const strategies: Array<{ name: string; run: () => Promise<string> }> = [
-    {
-      name: "pdf-parse-default",
-      run: () => extractWithPdfParse(buffer, {}),
-    },
-    {
-      name: "pdf-parse-xfa-fonts",
-      run: () =>
-        extractWithPdfParse(buffer, {
-          enableXfa: true,
-          useSystemFonts: true,
-          useWorkerFetch: true,
-          ...pdfJsResourceUrls(),
-        }),
-    },
+    { name: "pdf-parse-default", run: () => extractWithPdfParse(buffer, {}) },
+    { name: "pdf-parse-xfa-fonts", run: () => extractWithPdfParse(buffer, xfaLoad) },
     {
       name: "pdf-parse-no-normalize",
-      run: () =>
-        extractWithPdfParse(
-          buffer,
-          {
-            enableXfa: true,
-            useSystemFonts: true,
-            useWorkerFetch: true,
-            ...pdfJsResourceUrls(),
-          },
-          { disableNormalization: true },
-        ),
+      run: () => extractWithPdfParse(buffer, xfaLoad, { disableNormalization: true }),
     },
+    { name: "pdf-parse-table", run: () => extractWithPdfParseTable(buffer, xfaLoad) },
     {
       name: "pdfjs-direct",
       run: () =>
         extractWithPdfJsDirect(buffer, {
           enableXfa: true,
           useSystemFonts: true,
-          useWorkerFetch: true,
+          useWorkerFetch: false,
         }),
     },
-    {
-      name: "pdfjs-direct-no-stream",
-      run: () =>
-        extractWithPdfJsDirect(buffer, {
-          enableXfa: true,
-          useSystemFonts: true,
-          useWorkerFetch: true,
-          disableStream: true,
-          disableAutoFetch: true,
-        }),
-    },
-    {
-      name: "legacy-pdf-parse",
-      run: () => extractWithLegacy(buffer),
-    },
+    { name: "legacy-pdf-parse", run: () => extractWithLegacy(buffer) },
+    { name: "pdftotext-poppler", run: () => extractWithPdftotext(buffer) },
   ];
 
   let best: { text: string; strategy: string; score: number } | null = null;
@@ -218,7 +238,9 @@ async function runExtractionStrategies(buffer: Buffer): Promise<{ text: string; 
     try {
       const text = await strategy.run();
       const score = scoreText(text);
-      console.info(`[compras] PDF extract ${strategy.name}: score=${score} len=${text.length}`);
+      console.info(
+        `[compras] PDF extract ${strategy.name}: score=${score} len=${text.length} preview="${previewText(text)}"`,
+      );
       if (score >= MIN_TEXT_LEN && (!best || score > best.score)) {
         best = { text, strategy: strategy.name, score };
       }
@@ -231,10 +253,6 @@ async function runExtractionStrategies(buffer: Buffer): Promise<{ text: string; 
   return best ? { text: best.text, strategy: best.strategy } : null;
 }
 
-/**
- * Adapter de extracción de texto. Intercambiable por OCR/IA más adelante.
- * Contrato: buffer → string de texto plano.
- */
 export async function extractPdfTextFromBuffer(buffer: Buffer): Promise<string> {
   if (buffer.length === 0) {
     throw new AppError(400, "PDF_EMPTY", MSG_CORRUPT);
@@ -250,10 +268,21 @@ export async function extractPdfTextFromBuffer(buffer: Buffer): Promise<string> 
       console.info(`[compras] PDF extract OK via ${result.strategy}`);
       return result.text;
     }
+
+    if (isGeminiExtractionEnabled()) {
+      console.info("[compras] PDF extract probando Gemini fallback…");
+      const geminiText = await extractWithGemini(buffer);
+      const score = scoreText(geminiText);
+      console.info(
+        `[compras] PDF extract gemini: score=${score} len=${geminiText.length} preview="${previewText(geminiText)}"`,
+      );
+      if (score >= MIN_TEXT_LEN) return geminiText;
+    }
   } catch (err) {
     if (isPasswordError(err)) {
       throw new AppError(400, "PDF_PASSWORD", MSG_PASSWORD);
     }
+    if (err instanceof AppError) throw err;
     console.warn("[compras] PDF extract abortado:", err);
   }
 

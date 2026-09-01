@@ -48,6 +48,71 @@ function mapImportRow(row: Record<string, unknown>) {
   };
 }
 
+async function persistExtractedImportacion(importId: number, extracted: NormalizedInvoice) {
+  const matched = await withTransaction(async (client: DbClient) => {
+    return matchInvoiceProducts(client, extracted);
+  });
+
+  const issues = validateReviewInvoice(matched);
+  const estado = hasCriticalErrors(issues) ? "borrador" : "listo";
+
+  const { rows } = await pool.query(
+    `UPDATE pos_compras_importaciones
+     SET extracted_json = $2::jsonb,
+         review_json = $3::jsonb,
+         proveedor_id = $4,
+         warnings = $5::jsonb,
+         estado = $6,
+         error_message = NULL,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [
+      importId,
+      JSON.stringify(extracted),
+      JSON.stringify(matched),
+      matched.proveedor.proveedor_id,
+      JSON.stringify(issues),
+      estado,
+    ],
+  );
+
+  return mapImportRow(rows[0]);
+}
+
+export async function createImportacionFromText(input: {
+  text: string;
+  label?: string;
+}) {
+  const text = input.text.trim();
+  if (text.length < 20) {
+    throw new AppError(400, "TEXT_TOO_SHORT", "El texto pegado es demasiado corto.");
+  }
+
+  const placeholder = await pool.query<{ id: number }>(
+    `INSERT INTO pos_compras_importaciones (
+       estado, pdf_storage_key, pdf_original_name, pdf_mime, pdf_size
+     ) VALUES ('borrador', 'text-only', $1, 'text/plain', $2)
+     RETURNING id`,
+    [input.label?.trim() || "texto-manual.txt", Buffer.byteLength(text, "utf8")],
+  );
+  const importId = placeholder.rows[0].id;
+
+  try {
+    const extracted = parseInvoiceText(text);
+    return await persistExtractedImportacion(importId, extracted);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Error al procesar texto";
+    await pool.query(
+      `UPDATE pos_compras_importaciones
+       SET error_message = $2, updated_at = NOW()
+       WHERE id = $1`,
+      [importId, message],
+    );
+    throw err;
+  }
+}
+
 export async function createImportacionFromPdf(file: {
   filename: string;
   mimetype: string;
@@ -78,36 +143,7 @@ export async function createImportacionFromPdf(file: {
 
     const text = await extractPdfTextFromBuffer(file.buffer);
     const extracted = parseInvoiceText(text);
-
-    const matched = await withTransaction(async (client: DbClient) => {
-      return matchInvoiceProducts(client, extracted);
-    });
-
-    const issues = validateReviewInvoice(matched);
-    const estado = hasCriticalErrors(issues) ? "borrador" : "listo";
-
-    const { rows } = await pool.query(
-      `UPDATE pos_compras_importaciones
-       SET extracted_json = $2::jsonb,
-           review_json = $3::jsonb,
-           proveedor_id = $4,
-           warnings = $5::jsonb,
-           estado = $6,
-           error_message = NULL,
-           updated_at = NOW()
-       WHERE id = $1
-       RETURNING *`,
-      [
-        importId,
-        JSON.stringify(extracted),
-        JSON.stringify(matched),
-        matched.proveedor.proveedor_id,
-        JSON.stringify(issues),
-        estado,
-      ],
-    );
-
-    return mapImportRow(rows[0]);
+    return await persistExtractedImportacion(importId, extracted);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Error al procesar PDF";
     await pool.query(

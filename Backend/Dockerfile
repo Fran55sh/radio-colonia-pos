@@ -9,6 +9,9 @@ COPY src ./src
 RUN npm run build
 
 FROM node:22-bookworm-slim AS runner
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends poppler-utils \
+  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json* ./

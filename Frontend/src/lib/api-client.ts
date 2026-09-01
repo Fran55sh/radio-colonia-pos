@@ -367,6 +367,16 @@ export async function uploadFacturaPdf(file: File): Promise<CompraImportacion> {
   return apiFetchFormData<CompraImportacion>("/compras/importaciones", form);
 }
 
+export async function uploadFacturaTexto(input: {
+  text: string;
+  label?: string;
+}): Promise<CompraImportacion> {
+  return apiFetch<CompraImportacion>("/compras/importaciones/texto", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function fetchImportaciones(): Promise<CompraImportacion[]> {
   const data = await apiFetch<{ importaciones: CompraImportacion[] }>(
     "/compras/importaciones",
