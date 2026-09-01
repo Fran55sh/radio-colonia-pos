@@ -37,6 +37,29 @@ describe("parseInvoiceText", () => {
     const inv = parseInvoiceText("hola mundo sin datos fiscales suficientes aqui");
     expect(inv.items).toEqual([]);
   });
+
+  it("parses OCR-style table rows with numeric supplier codes", () => {
+    const OCR = `
+FACTURA A 00003 - 00040899
+Fecna: 26/08/26
+EXIMETAL S.A.
+CUIT: 30-70841130-0
+
+100012  Cano estructural 20x20  120  1.250,00  150.000,00
+100034  Perfil U 80x40  85  2.100,50  178.542,50
+
+Importe Neto Gravado: 853.740,00
+IVA 21%: 179.285,40
+Total: 1.033.025,40
+`;
+    const inv = parseInvoiceText(OCR);
+    expect(inv.factura.tipo).toBe("A");
+    expect(inv.factura.punto_venta).toBe("0003");
+    expect(inv.factura.numero).toBe("00040899");
+    expect(inv.proveedor.razon_social).toContain("EXIMETAL");
+    expect(inv.items.length).toBeGreaterThanOrEqual(2);
+    expect(inv.totales.subtotal).toBeCloseTo(853740, 0);
+  });
 });
 
 describe("validateReviewInvoice", () => {

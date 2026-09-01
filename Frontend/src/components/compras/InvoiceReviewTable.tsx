@@ -2,6 +2,23 @@ import type { NormalizedInvoice, NormalizedInvoiceItem } from "@/lib/api-client"
 import { formatARS } from "@/lib/format-money";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Plus, Trash2 } from "lucide-react";
+
+function createEmptyItem(): NormalizedInvoiceItem {
+  return {
+    codigo_proveedor: null,
+    descripcion: "",
+    cantidad: 1,
+    precio_unitario: 0,
+    descuento: 0,
+    importe: 0,
+    variant_id: null,
+    sku: null,
+    producto_nombre: null,
+    encontrado: false,
+    requiere_revision: true,
+  };
+}
 
 type Props = {
   invoice: NormalizedInvoice;
@@ -105,6 +122,13 @@ export function InvoiceReviewTable({ invoice, onChange, onPickProduct }: Props) 
             </tr>
           </thead>
           <tbody>
+            {invoice.items.length === 0 && (
+              <tr>
+                <td colSpan={8} className="px-4 py-8 text-center text-sm text-silver">
+                  No se detectaron líneas en el PDF. Agregá cada producto manualmente.
+                </td>
+              </tr>
+            )}
             {invoice.items.map((item, idx) => {
               const ok = Boolean(item.variant_id);
               return (
@@ -144,8 +168,19 @@ export function InvoiceReviewTable({ invoice, onChange, onPickProduct }: Props) 
                       {ok ? "Cambiar" : "Vincular"}
                     </Button>
                   </td>
-                  <td className="px-3 py-2 text-xs text-silver max-w-[180px] truncate">
-                    {item.descripcion}
+                  <td className="px-3 py-2 text-xs text-silver max-w-[180px]">
+                    <Input
+                      value={item.descripcion}
+                      onChange={(e) =>
+                        onChange(
+                          updateItem(invoice, idx, {
+                            descripcion: e.target.value,
+                          }),
+                        )
+                      }
+                      placeholder="Descripción de la factura"
+                      className="h-8 bg-midnight border-border text-xs"
+                    />
                   </td>
                   <td className="px-3 py-2">
                     <Input
@@ -196,13 +231,47 @@ export function InvoiceReviewTable({ invoice, onChange, onPickProduct }: Props) 
                     />
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-silver-light font-semibold">
-                    {formatARS(item.importe)}
+                    <div className="flex items-center justify-end gap-2">
+                      <span>{formatARS(item.importe)}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-offline hover:text-offline"
+                        onClick={() =>
+                          onChange({
+                            ...invoice,
+                            items: invoice.items.filter((_, i) => i !== idx),
+                          })
+                        }
+                        title="Quitar línea"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+      </div>
+
+      <div className="flex justify-start">
+        <Button
+          type="button"
+          variant="outline"
+          className="border-border text-silver-light gap-2"
+          onClick={() =>
+            onChange({
+              ...invoice,
+              items: [...invoice.items, createEmptyItem()],
+            })
+          }
+        >
+          <Plus className="size-4" />
+          Agregar línea
+        </Button>
       </div>
 
       <div className="flex flex-wrap gap-4 justify-end text-sm">
