@@ -3,7 +3,7 @@ import type { DbClient } from "../../../config/db.js";
 import { AppError } from "../../../middleware/errors.js";
 import { executeImportacion } from "./execute.js";
 import { parseInvoiceText } from "./invoice-parser.js";
-import { extractPdfText } from "./pdf-text-extractor.js";
+import { extractPdfTextFromBuffer } from "./pdf-text-extractor.js";
 import {
   resolvePdfPath,
   storePdfBuffer,
@@ -70,13 +70,13 @@ export async function createImportacionFromPdf(file: {
   const importId = placeholder.rows[0].id;
 
   try {
-    const { storageKey, absolutePath } = await storePdfBuffer(file.buffer, importId);
+    const { storageKey } = await storePdfBuffer(file.buffer, importId);
     await pool.query(
       `UPDATE pos_compras_importaciones SET pdf_storage_key = $2, updated_at = NOW() WHERE id = $1`,
       [importId, storageKey],
     );
 
-    const text = await extractPdfText(absolutePath);
+    const text = await extractPdfTextFromBuffer(file.buffer);
     const extracted = parseInvoiceText(text);
 
     const matched = await withTransaction(async (client: DbClient) => {
