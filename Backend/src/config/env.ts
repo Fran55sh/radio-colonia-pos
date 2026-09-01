@@ -67,8 +67,6 @@ const envSchema = z.object({
   POS_JWT_SECRET: z.string().min(16).optional(),
   POS_SESSION_HOURS: z.coerce.number().int().positive().default(12),
   COMPRAS_PDF_DIR: z.string().default("./data/compras-pdfs"),
-  COMPRAS_GEMINI_API_KEY: z.string().optional(),
-  COMPRAS_GEMINI_MODEL: z.string().default("gemini-2.0-flash"),
 });
 
 const databaseUrl = resolveDatabaseUrl();
@@ -85,8 +83,6 @@ export const env = envSchema.parse({
   POS_JWT_SECRET: process.env.POS_JWT_SECRET || undefined,
   POS_SESSION_HOURS: process.env.POS_SESSION_HOURS,
   COMPRAS_PDF_DIR: process.env.COMPRAS_PDF_DIR,
-  COMPRAS_GEMINI_API_KEY: process.env.COMPRAS_GEMINI_API_KEY || undefined,
-  COMPRAS_GEMINI_MODEL: process.env.COMPRAS_GEMINI_MODEL,
 });
 
 if (env.NODE_ENV === "production") {

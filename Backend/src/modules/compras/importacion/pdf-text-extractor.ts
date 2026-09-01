@@ -6,7 +6,6 @@ import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mj
 import type { DocumentInitParameters } from "pdfjs-dist/types/src/display/api.js";
 import { PasswordException, PDFParse, type LoadParameters } from "pdf-parse";
 import { AppError } from "../../../middleware/errors.js";
-import { extractWithGemini, isGeminiExtractionEnabled } from "./pdf-gemini.js";
 import { extractWithOcr } from "./pdf-ocr.js";
 import { extractWithPdftotext } from "./pdf-poppler.js";
 
@@ -25,11 +24,12 @@ GlobalWorkerOptions.workerSrc = pathToFileURL(
 const MIN_TEXT_LEN = 20;
 
 const MSG_NO_TEXT =
-  "No pudimos extraer suficiente texto del PDF con parsers locales.\n\n" +
-  "Este PDF parece ser una imagen (sin capa de texto embebida). Probá:\n" +
-  "1) Pegar el texto de la factura (botón abajo), o\n" +
-  "2) Descargar el comprobante original desde AFIP/ARCA (PDF con texto), o\n" +
-  "3) Configurar COMPRAS_GEMINI_API_KEY en el backend para facturas escaneadas.";
+  "No pudimos leer el texto embebido del PDF.\n\n" +
+  "Muchos comprobantes generados con PDFCreator / \"Imprimir a PDF\" no guardan texto en el archivo " +
+  "(solo una imagen). El visor de Windows puede dejarte copiar porque hace OCR al seleccionar.\n\n" +
+  "Probá:\n" +
+  "1) Pestaña \"Pegar texto\": copiá desde el visor del PDF y pegá acá, o\n" +
+  "2) Descargar el PDF original desde AFIP/ARCA (con texto real).";
 
 const MSG_PASSWORD =
   "El PDF está protegido con contraseña.\n\n" +
@@ -296,16 +296,6 @@ export async function extractPdfTextFromBuffer(buffer: Buffer): Promise<string> 
     if (result) {
       console.info(`[compras] PDF extract OK via ${result.strategy}`);
       return result.text;
-    }
-
-    if (isGeminiExtractionEnabled()) {
-      console.info("[compras] PDF extract probando Gemini fallback…");
-      const geminiText = await extractWithGemini(buffer);
-      const score = scoreText(geminiText);
-      console.info(
-        `[compras] PDF extract gemini: score=${score} len=${geminiText.length} preview="${previewText(geminiText)}"`,
-      );
-      if (score >= MIN_TEXT_LEN) return geminiText;
     }
   } catch (err) {
     if (isPasswordError(err)) {

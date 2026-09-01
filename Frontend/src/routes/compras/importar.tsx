@@ -278,8 +278,9 @@ function ImportarFacturaWizard() {
             {uploadMode === "pdf" ? (
               <>
                 <p className="text-sm text-silver">
-                  Subí el PDF de la factura electrónica. Si el PDF no se puede leer automáticamente,
-                  podés cambiar a &quot;Pegar texto&quot; y usar el texto que extraigas (ej. con Gemini).
+                  Subí el PDF de la factura. Si fue generado con &quot;Imprimir a PDF&quot; / PDFCreator,
+                  el sistema intentará leerlo con OCR. Si falla, copiá el texto desde el visor del PDF
+                  y usá la pestaña &quot;Pegar texto&quot;.
                 </p>
                 <input
                   type="file"
@@ -299,8 +300,8 @@ function ImportarFacturaWizard() {
             ) : (
               <>
                 <p className="text-sm text-silver">
-                  Pegá el texto completo de la factura (CUIT, ítems, totales). Podés copiarlo desde
-                  Gemini u otro lector si el PDF no se procesa solo.
+                  Pegá el texto completo de la factura (CUIT, ítems, totales). Abrí el PDF, seleccioná
+                  todo (Ctrl+A), copiá y pegá acá.
                 </p>
                 <textarea
                   value={pastedText}
