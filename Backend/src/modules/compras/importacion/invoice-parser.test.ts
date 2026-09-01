@@ -60,6 +60,67 @@ Total: 1.033.025,40
     expect(inv.items.length).toBeGreaterThanOrEqual(2);
     expect(inv.totales.subtotal).toBeCloseTo(853740, 0);
   });
+
+  it("parses columnar OCR layout (COD/CANT/DETALLE/UNITARIO/TOTAL stacked)", () => {
+    const COLUMNAR_OCR = `
+FACTURA
+A
+EXIMETAL S.A.
+Senor/es:
+CLIENTE DEMO
+COD
+EC67
+E107
+EC61
+EC62
+CANT
+6,00
+2,00
+1,00
+1,00
+KG
+L
+KE
+KG
+DETALL E
+SOLD. SN 60%D.0 7MM CT 250 GR
+SOLD. SN 60% D0 7 MM CT 100G ******
+SOLD. SN 60% 0.1 MM CT 250 GR
+SOLD. SN 60% D.2 MM CT 250 GR.
+CODIGO 000001
+C.U. l.T. N°: 30519144138
+UNITARIO %D
+82620,00
+96390.00
+82620.00
+82620,00
+c.
+TOTAL
+495.720,00
+192.780,00
+82.620,00
+82.620,00
+00003 - 00040899
+FECHA: 26/08/26
+SUbtotal
+853.740,00
+179.285,40
+TOTAL $
+1.033.025,40
+`;
+    const inv = parseInvoiceText(COLUMNAR_OCR);
+    expect(inv.items).toHaveLength(4);
+    expect(inv.items.map((i) => i.codigo_proveedor)).toEqual(["EC67", "E107", "EC61", "EC62"]);
+    expect(inv.items[0]!.cantidad).toBeCloseTo(6, 2);
+    expect(inv.items[0]!.precio_unitario).toBeCloseTo(82620, 0);
+    expect(inv.items[0]!.importe).toBeCloseTo(495720, 0);
+    expect(inv.items[1]!.importe).toBeCloseTo(192780, 0);
+    expect(inv.proveedor.cuit).toBe("30519144138");
+    expect(inv.factura.punto_venta).toBe("0003");
+    expect(inv.factura.numero).toBe("00040899");
+    expect(inv.totales.subtotal).toBeCloseTo(853740, 0);
+    expect(inv.totales.total).toBeCloseTo(1033025.4, 0);
+  });
 });
 
 describe("validateReviewInvoice", () => {

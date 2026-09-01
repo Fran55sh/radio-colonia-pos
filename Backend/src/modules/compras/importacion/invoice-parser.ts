@@ -29,6 +29,152 @@ function parseFecha(raw: string): string | null {
   return `${y}-${mo}-${d}`;
 }
 
+const MONEY_LINE = /^[\d.,\s]+$/;
+
+function isMoneyLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!MONEY_LINE.test(trimmed)) return false;
+  return parseMoney(trimmed) > 0;
+}
+
+function isUnitLine(line: string): boolean {
+  return /^(KG|KE|L|LT|UN|MT|M2|M3|PAR|U)$/i.test(line.trim());
+}
+
+function isSupplierProductCode(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length < 2 || trimmed.length > 12) return false;
+  if (/^COD/i.test(trimmed) || /^CANT$/i.test(trimmed)) return false;
+  return /^[A-Z]{1,4}\d{1,4}$/i.test(trimmed);
+}
+
+function findSectionStart(lines: string[], pattern: RegExp): number {
+  return lines.findIndex((line) => pattern.test(line.trim()));
+}
+
+function collectUntil(lines: string[], start: number, stop: RegExp[]): string[] {
+  const out: string[] = [];
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const trimmed = lines[i]!.trim();
+    if (!trimmed) continue;
+    if (/^(COD|CANT|DETALL|UNITARIO|TOTAL|SUB\s*TOTAL|I\.?\s*V\.?\s*A|CAE|ORIGINAL)/i.test(trimmed)) {
+      if (out.length > 0) break;
+    }
+    if (stop.some((rx) => rx.test(trimmed))) break;
+    out.push(trimmed);
+  }
+  return out;
+}
+
+/** OCR tools often read table columns vertically (COD / CANT / DETALLE stacked). */
+function parseItemsFromColumnarOcr(lines: string[]): NormalizedInvoiceItem[] {
+  const codIdx = findSectionStart(lines, /^COD$/i);
+  const cantIdx = findSectionStart(lines, /^CANT$/i);
+  const detalleIdx = findSectionStart(lines, /^DETALL/i);
+  const unitIdx = findSectionStart(lines, /^UNITARIO/i);
+  const totalIdx = lines.findIndex(
+    (line, idx) =>
+      /^TOTAL$/i.test(line.trim()) &&
+      idx > unitIdx &&
+      unitIdx >= 0 &&
+      !/^TOTAL\s*\$/i.test(line.trim()),
+  );
+
+  if (codIdx < 0 || cantIdx < 0 || detalleIdx < 0 || unitIdx < 0 || totalIdx < 0) {
+    return [];
+  }
+
+  const codes = collectUntil(lines, codIdx, [/^CANT$/i]).filter(isSupplierProductCode);
+  const quantities = collectUntil(lines, cantIdx, [/^DETALL/i, /^KG$/i])
+    .filter((line) => !isUnitLine(line))
+    .filter((line) => parseMoney(line) > 0);
+  const descriptions = collectUntil(lines, detalleIdx, [/^UNITARIO/i, /^CODIGO/i]).filter(
+    (line) => line.length > 8 && !/^c\.$/i.test(line),
+  );
+  const unitPrices = collectUntil(lines, unitIdx, [/^TOTAL$/i, /^c\.$/i]).filter(isMoneyLine);
+  const lineTotals = collectUntil(lines, totalIdx, [/^0000/i, /^FECHA/i, /^\*/i, /^SUB/i]).filter(
+    isMoneyLine,
+  );
+
+  const rows = Math.min(
+    codes.length,
+    quantities.length,
+    descriptions.length,
+    unitPrices.length,
+    lineTotals.length,
+  );
+  if (rows === 0) return [];
+
+  const items: NormalizedInvoiceItem[] = [];
+  for (let i = 0; i < rows; i += 1) {
+    const item = buildItem({
+      codigo_proveedor: codes[i]!,
+      descripcion: descriptions[i]!,
+      cantidad: parseMoney(quantities[i]!),
+      precio_unitario: parseMoney(unitPrices[i]!),
+      importe: parseMoney(lineTotals[i]!),
+    });
+    if (item) items.push(item);
+  }
+  return items;
+}
+
+function parseSupplierCuit(lines: string[], flat: string): string | null {
+  const header = lines.slice(0, lines.findIndex((l) => /senor|señor|sres|cliente/i.test(l)) || 40);
+  for (const line of header) {
+    const m = line.match(/C\.?\s*U\.?\s*I\.?\s*T\.?\s*N[°o]?\s*:?\s*([\d\-]+)/i);
+    if (m) {
+      const cuit = normalizeCuit(m[1]);
+      if (cuit) return cuit;
+    }
+  }
+  const cuits = [...flat.matchAll(/\b(\d{2}-?\d{8}-?\d)\b/g)]
+    .map((m) => normalizeCuit(m[1]))
+    .filter(Boolean) as string[];
+  return cuits.find((c) => c.startsWith("30")) ?? cuits[0] ?? null;
+}
+
+function parseTotalesFromOcr(lines: string[], flat: string) {
+  let subtotal: number | null = null;
+  let iva: number | null = null;
+  let total: number | null = null;
+
+  const subMatch =
+    flat.match(/Imp(?:orte)?\s+Neto(?:\s+Gravado)?\s*:?\s*\$?\s*([\d.,]+)/i) ??
+    flat.match(/Sub\s*total[^\d]*([\d]{1,3}(?:\.\d{3})*(?:,\d{2})?)/i);
+  if (subMatch) subtotal = parseMoney(subMatch[1]);
+
+  const ivaMatch = flat.match(/I\.?\s*V\.?\s*A\.?[^\d]*([\d]{1,3}(?:\.\d{3})*(?:,\d{2})?)/i);
+  if (ivaMatch) iva = parseMoney(ivaMatch[1]);
+
+  const totWithDollar = flat.match(/TOTAL\s*\$\s*([\d]{1,3}(?:\.\d{3})*(?:,\d{2})?)/i);
+  if (totWithDollar) {
+    total = parseMoney(totWithDollar[1]!);
+  } else {
+    const allTotals = [...flat.matchAll(/TOTAL\s*:?\s*\$?\s*([\d]{1,3}(?:\.\d{3})*(?:,\d{2})?)/gi)]
+      .map((m) => parseMoney(m[1]!))
+      .filter((n) => n > 0);
+    if (allTotals.length > 0) total = Math.max(...allTotals);
+  }
+
+  if (subtotal == null || iva == null || total == null) {
+    const moneyAfterSub = lines
+      .flatMap((line, idx) => {
+        if (!/sub\s*total/i.test(line) && !/subtolal/i.test(line)) return [];
+        return lines.slice(idx, idx + 8);
+      })
+      .filter(isMoneyLine)
+      .map(parseMoney)
+      .filter((n) => n > 1000);
+
+    if (subtotal == null && moneyAfterSub.length >= 1) subtotal = moneyAfterSub[0]!;
+    if (iva == null && moneyAfterSub.length >= 2) iva = moneyAfterSub[1]!;
+    if (total == null && moneyAfterSub.length >= 3) total = moneyAfterSub[2]!;
+  }
+
+  return { subtotal, iva, total };
+}
+
 const HEADER_OR_TOTAL =
   /^(c[oó]digo|c[oó]d\.?|descripci[oó]n|cant\.?|cantidad|precio|p\.?\s*unit|importe|subtotal|total|iva|neto|gravado|unidad|u\.?m\.?)$/i;
 
@@ -166,7 +312,7 @@ export function parseInvoiceText(text: string): NormalizedInvoice {
   const cuitMatches = [...flat.matchAll(/\b(\d{2}-?\d{8}-?\d)\b/g)].map((m) =>
     normalizeCuit(m[1]),
   );
-  const proveedorCuit = cuitMatches.find(Boolean) ?? null;
+  const proveedorCuit = parseSupplierCuit(lines, flat) ?? cuitMatches.find(Boolean) ?? null;
 
   let tipo: string | null = null;
   const tipoMatch =
@@ -217,23 +363,14 @@ export function parseInvoiceText(text: string): NormalizedInvoice {
   const condicionMatch = flat.match(/Condici[oó]n\s+(?:frente\s+al\s+)?IVA\s*:?\s*([^\n]+)/i);
   const condicionIva = condicionMatch?.[1]?.trim() ?? null;
 
-  let items = parseItemsFromStructuredLines(lines);
+  let items = parseItemsFromColumnarOcr(lines);
+  if (items.length === 0) items = parseItemsFromStructuredLines(lines);
   if (items.length === 0) items = parseItemsFromOcrBlob(flat.replace(/\n+/g, " "));
 
-  let subtotal: number | null = null;
-  let iva: number | null = null;
-  let total: number | null = null;
-
-  const subMatch =
-    flat.match(/Imp(?:orte)?\s+Neto(?:\s+Gravado)?\s*:?\s*\$?\s*([\d.,]+)/i) ??
-    flat.match(/Subtotal\s*:?\s*\$?\s*([\d.,]+)/i);
-  if (subMatch) subtotal = parseMoney(subMatch[1]);
-
-  const ivaMatch = flat.match(/IVA\s*(?:21\s*%?)?\s*:?\s*\$?\s*([\d.,]+)/i);
-  if (ivaMatch) iva = parseMoney(ivaMatch[1]);
-
-  const totMatch = flat.match(/Total\s*:?\s*\$?\s*([\d.,]+)/i);
-  if (totMatch) total = parseMoney(totMatch[1]);
+  const totalesParsed = parseTotalesFromOcr(lines, flat);
+  let subtotal = totalesParsed.subtotal;
+  let iva = totalesParsed.iva;
+  let total = totalesParsed.total;
 
   if (subtotal == null && items.length > 0) {
     subtotal = items.reduce((s, i) => s + i.importe, 0);

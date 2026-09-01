@@ -274,8 +274,7 @@ export async function lockAndIncrementForPurchase(
   }>(
     `UPDATE product_variants
      SET stock = stock + $1,
-         cost_price = COALESCE($3::numeric, cost_price),
-         updated_at = NOW()
+         cost_price = COALESCE($3::numeric, cost_price)
      WHERE id = $2
      RETURNING id AS variant_id, sku, stock`,
     [quantity, variantId, costUnitario != null ? costUnitario.toFixed(2) : null],
