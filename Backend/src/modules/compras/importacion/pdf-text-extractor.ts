@@ -1,18 +1,25 @@
 import { readFile } from "fs/promises";
 import { createRequire } from "module";
-import { PasswordException, PDFParse } from "pdf-parse";
+import path from "path";
+import { pathToFileURL } from "url";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import type { DocumentInitParameters } from "pdfjs-dist/types/src/display/api.js";
+import { PasswordException, PDFParse, type LoadParameters } from "pdf-parse";
 import { AppError } from "../../../middleware/errors.js";
 
 const require = createRequire(import.meta.url);
-type LegacyPdfParse = (buffer: Buffer) => Promise<{ text?: string }>;
+type LegacyPdfParse = (
+  buffer: Buffer,
+  options?: { max?: number; version?: string },
+) => Promise<{ text?: string }>;
 const legacyPdfParse = require("legacy-pdf-parse/lib/pdf-parse.js") as LegacyPdfParse;
 
 const MIN_TEXT_LEN = 20;
 
 const MSG_NO_TEXT =
-  "El PDF no tiene texto seleccionable.\n\n" +
-  "Usá el PDF original de AFIP/ARCA (factura electrónica), no una foto ni un escaneo.\n" +
-  "Tip: abrí el PDF y verificá que podés seleccionar texto con el mouse.";
+  "No pudimos extraer texto del PDF con los parsers locales.\n\n" +
+  "Si podés seleccionar texto en el visor, puede ser un formato AFIP/XFA o fuentes especiales.\n" +
+  "Probá re-exportar/descargar de nuevo el comprobante desde AFIP/ARCA o el mail original del proveedor.";
 
 const MSG_PASSWORD =
   "El PDF está protegido con contraseña.\n\n" +
@@ -21,6 +28,24 @@ const MSG_PASSWORD =
 const MSG_CORRUPT =
   "No se pudo abrir el PDF.\n\n" +
   "Verificá que el archivo no esté corrupto y que sea un PDF válido.";
+
+function pdfJsResourceUrls(): Pick<
+  DocumentInitParameters,
+  "standardFontDataUrl" | "cMapUrl" | "cMapPacked"
+> {
+  const pdfjsRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
+  return {
+    standardFontDataUrl: pathToFileURL(path.join(pdfjsRoot, "standard_fonts/")).href,
+    cMapUrl: pathToFileURL(path.join(pdfjsRoot, "cmaps/")).href,
+    cMapPacked: true,
+  };
+}
+
+function scoreText(text: string): number {
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  return trimmed.replace(/[^\p{L}\p{N}]/gu, "").length;
+}
 
 function normalizeExtractedText(result: {
   text?: string;
@@ -33,25 +58,177 @@ function normalizeExtractedText(result: {
   return (result.text ?? "").trim() || fromPages.trim();
 }
 
-async function extractWithV2(buffer: Buffer): Promise<string> {
-  const parser = new PDFParse({ data: new Uint8Array(buffer) });
+function collectStrings(value: unknown, out: string[]): void {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed) out.push(trimmed);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectStrings(item, out);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const item of Object.values(value as Record<string, unknown>)) {
+      collectStrings(item, out);
+    }
+  }
+}
+
+async function extractWithPdfParse(
+  buffer: Buffer,
+  load: LoadParameters,
+  parse?: { disableNormalization?: boolean },
+): Promise<string> {
+  const parser = new PDFParse({ ...load, data: new Uint8Array(buffer) });
   try {
-    const result = await parser.getText();
+    const result = await parser.getText(parse ?? {});
     return normalizeExtractedText(result);
   } finally {
     await parser.destroy().catch(() => undefined);
   }
 }
 
+async function extractWithPdfJsDirect(
+  buffer: Buffer,
+  load: DocumentInitParameters,
+): Promise<string> {
+  const loadingTask = getDocument({
+    ...pdfJsResourceUrls(),
+    ...load,
+    data: new Uint8Array(buffer),
+  });
+
+  const doc = await loadingTask.promise;
+  const chunks: string[] = [];
+
+  try {
+    const fields = await doc.getFieldObjects().catch(() => null);
+    if (fields) {
+      for (const [fieldName, entries] of Object.entries(fields)) {
+        const values: string[] = [];
+        collectStrings(entries, values);
+        if (values.length > 0) {
+          chunks.push(`${fieldName}: ${values.join(" ")}`);
+        } else {
+          chunks.push(fieldName);
+        }
+      }
+    }
+
+    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
+      const page = await doc.getPage(pageNumber);
+      for (const disableNormalization of [false, true] as const) {
+        const textContent = await page.getTextContent({
+          includeMarkedContent: true,
+          disableNormalization,
+        });
+        const pageText = textContent.items
+          .map((item) => ("str" in item ? item.str : ""))
+          .join(" ")
+          .trim();
+        if (pageText) chunks.push(pageText);
+      }
+      page.cleanup();
+    }
+  } finally {
+    await doc.destroy().catch(() => undefined);
+  }
+
+  return [...new Set(chunks)].join("\n").trim();
+}
+
 async function extractWithLegacy(buffer: Buffer): Promise<string> {
-  const result = await legacyPdfParse(buffer);
+  const result = await legacyPdfParse(buffer, { max: 0 });
   return (result.text ?? "").trim();
 }
 
 function isPasswordError(err: unknown): boolean {
   if (err instanceof PasswordException) return true;
   const message = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
-  return message.includes("password");
+  return (
+    message.includes("password") ||
+    message.includes("encrypted") ||
+    (typeof err === "object" &&
+      err !== null &&
+      "name" in err &&
+      String((err as { name?: string }).name).includes("Password"))
+  );
+}
+
+async function runExtractionStrategies(buffer: Buffer): Promise<{ text: string; strategy: string } | null> {
+  const strategies: Array<{ name: string; run: () => Promise<string> }> = [
+    {
+      name: "pdf-parse-default",
+      run: () => extractWithPdfParse(buffer, {}),
+    },
+    {
+      name: "pdf-parse-xfa-fonts",
+      run: () =>
+        extractWithPdfParse(buffer, {
+          enableXfa: true,
+          useSystemFonts: true,
+          useWorkerFetch: true,
+          ...pdfJsResourceUrls(),
+        }),
+    },
+    {
+      name: "pdf-parse-no-normalize",
+      run: () =>
+        extractWithPdfParse(
+          buffer,
+          {
+            enableXfa: true,
+            useSystemFonts: true,
+            useWorkerFetch: true,
+            ...pdfJsResourceUrls(),
+          },
+          { disableNormalization: true },
+        ),
+    },
+    {
+      name: "pdfjs-direct",
+      run: () =>
+        extractWithPdfJsDirect(buffer, {
+          enableXfa: true,
+          useSystemFonts: true,
+          useWorkerFetch: true,
+        }),
+    },
+    {
+      name: "pdfjs-direct-no-stream",
+      run: () =>
+        extractWithPdfJsDirect(buffer, {
+          enableXfa: true,
+          useSystemFonts: true,
+          useWorkerFetch: true,
+          disableStream: true,
+          disableAutoFetch: true,
+        }),
+    },
+    {
+      name: "legacy-pdf-parse",
+      run: () => extractWithLegacy(buffer),
+    },
+  ];
+
+  let best: { text: string; strategy: string; score: number } | null = null;
+
+  for (const strategy of strategies) {
+    try {
+      const text = await strategy.run();
+      const score = scoreText(text);
+      console.info(`[compras] PDF extract ${strategy.name}: score=${score} len=${text.length}`);
+      if (score >= MIN_TEXT_LEN && (!best || score > best.score)) {
+        best = { text, strategy: strategy.name, score };
+      }
+    } catch (err) {
+      if (isPasswordError(err)) throw err;
+      console.warn(`[compras] PDF extract ${strategy.name} falló:`, err);
+    }
+  }
+
+  return best ? { text: best.text, strategy: best.strategy } : null;
 }
 
 /**
@@ -63,38 +240,24 @@ export async function extractPdfTextFromBuffer(buffer: Buffer): Promise<string> 
     throw new AppError(400, "PDF_EMPTY", MSG_CORRUPT);
   }
 
-  let v2Text = "";
-  let v2Failed = false;
-
-  try {
-    v2Text = await extractWithV2(buffer);
-    if (v2Text.length >= MIN_TEXT_LEN) return v2Text;
-  } catch (err) {
-    v2Failed = true;
-    if (isPasswordError(err)) {
-      throw new AppError(400, "PDF_PASSWORD", MSG_PASSWORD);
-    }
-    console.warn("[compras] pdf-parse v2 falló:", err);
+  if (!buffer.subarray(0, 4).toString("utf8").startsWith("%PDF")) {
+    throw new AppError(400, "PDF_PARSE_ERROR", MSG_CORRUPT);
   }
 
   try {
-    const legacyText = await extractWithLegacy(buffer);
-    if (legacyText.length >= MIN_TEXT_LEN) return legacyText;
-    if (!v2Failed && v2Text.length > 0 && legacyText.length > v2Text.length) {
-      return legacyText;
+    const result = await runExtractionStrategies(buffer);
+    if (result) {
+      console.info(`[compras] PDF extract OK via ${result.strategy}`);
+      return result.text;
     }
   } catch (err) {
     if (isPasswordError(err)) {
       throw new AppError(400, "PDF_PASSWORD", MSG_PASSWORD);
     }
-    console.warn("[compras] pdf-parse legacy falló:", err);
+    console.warn("[compras] PDF extract abortado:", err);
   }
 
-  if (v2Text.length > 0 || !v2Failed) {
-    throw new AppError(400, "PDF_NO_TEXT", MSG_NO_TEXT);
-  }
-
-  throw new AppError(400, "PDF_PARSE_ERROR", MSG_CORRUPT);
+  throw new AppError(400, "PDF_NO_TEXT", MSG_NO_TEXT);
 }
 
 export async function extractPdfText(absolutePath: string): Promise<string> {

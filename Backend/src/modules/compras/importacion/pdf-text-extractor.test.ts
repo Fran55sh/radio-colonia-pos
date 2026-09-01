@@ -11,7 +11,7 @@ describe("extractPdfTextFromBuffer", () => {
 
   it("rejects invalid pdf bytes", async () => {
     await expect(extractPdfTextFromBuffer(Buffer.from("%PDF-invalid"))).rejects.toMatchObject({
-      code: "PDF_PARSE_ERROR",
+      code: "PDF_NO_TEXT",
     } satisfies Partial<AppError>);
   });
 });
