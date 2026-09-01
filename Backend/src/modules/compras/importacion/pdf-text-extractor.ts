@@ -7,6 +7,7 @@ import type { DocumentInitParameters } from "pdfjs-dist/types/src/display/api.js
 import { PasswordException, PDFParse, type LoadParameters } from "pdf-parse";
 import { AppError } from "../../../middleware/errors.js";
 import { extractWithGemini, isGeminiExtractionEnabled } from "./pdf-gemini.js";
+import { extractWithOcr } from "./pdf-ocr.js";
 import { extractWithPdftotext } from "./pdf-poppler.js";
 
 const require = createRequire(import.meta.url);
@@ -25,10 +26,10 @@ const MIN_TEXT_LEN = 20;
 
 const MSG_NO_TEXT =
   "No pudimos extraer suficiente texto del PDF con parsers locales.\n\n" +
-  "Este PDF parece tener poco texto embebido (solo metadatos). Probá:\n" +
+  "Este PDF parece ser una imagen (sin capa de texto embebida). Probá:\n" +
   "1) Pegar el texto de la factura (botón abajo), o\n" +
-  "2) Configurar COMPRAS_GEMINI_API_KEY en el backend, o\n" +
-  "3) Descargar de nuevo el comprobante desde AFIP/ARCA.";
+  "2) Descargar el comprobante original desde AFIP/ARCA (PDF con texto), o\n" +
+  "3) Configurar COMPRAS_GEMINI_API_KEY en el backend para facturas escaneadas.";
 
 const MSG_PASSWORD =
   "El PDF está protegido con contraseña.\n\n" +
@@ -57,6 +58,18 @@ function scoreText(text: string): number {
 
 function previewText(text: string): string {
   return text.replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+/** pdf-parse v2 injects page footers like "-- 1 of 1 --" when there is no real text. */
+function isPdfParsePageFooter(text: string): boolean {
+  const trimmed = text.trim();
+  return /^--\s*\d+\s+of\s+\d+\s*--$/i.test(trimmed);
+}
+
+function sanitizeExtractedText(text: string): string {
+  const trimmed = text.trim();
+  if (isPdfParsePageFooter(trimmed)) return "";
+  return trimmed;
 }
 
 function normalizeExtractedText(result: {
@@ -115,7 +128,7 @@ async function extractWithPdfParse(
   const parser = new PDFParse({ ...load, data: new Uint8Array(buffer) });
   try {
     const result = await parser.getText(parse ?? {});
-    return normalizeExtractedText(result);
+    return sanitizeExtractedText(normalizeExtractedText(result));
   } finally {
     await parser.destroy().catch(() => undefined);
   }
@@ -247,6 +260,22 @@ async function runExtractionStrategies(buffer: Buffer): Promise<{ text: string; 
     } catch (err) {
       if (isPasswordError(err)) throw err;
       console.warn(`[compras] PDF extract ${strategy.name} falló:`, err);
+    }
+  }
+
+  if (!best) {
+    try {
+      const text = await extractWithOcr(buffer);
+      const score = scoreText(text);
+      console.info(
+        `[compras] PDF extract tesseract-ocr: score=${score} len=${text.length} preview="${previewText(text)}"`,
+      );
+      if (score >= MIN_TEXT_LEN) {
+        best = { text, strategy: "tesseract-ocr", score };
+      }
+    } catch (err) {
+      if (isPasswordError(err)) throw err;
+      console.warn("[compras] PDF extract tesseract-ocr falló:", err);
     }
   }
 
