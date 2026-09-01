@@ -10,7 +10,10 @@ RUN npm run build
 
 FROM node:22-bookworm-slim AS runner
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends poppler-utils fontconfig libfontconfig1 \
+  && apt-get install -y --no-install-recommends \
+    poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-spa \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production

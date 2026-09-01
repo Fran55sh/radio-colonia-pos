@@ -265,17 +265,18 @@ async function runExtractionStrategies(buffer: Buffer): Promise<{ text: string; 
 
   if (!best) {
     try {
+      console.info("[compras] PDF extract probando tesseract-cli (pdftoppm + tesseract)…");
       const text = await extractWithOcr(buffer);
       const score = scoreText(text);
       console.info(
-        `[compras] PDF extract tesseract-ocr: score=${score} len=${text.length} preview="${previewText(text)}"`,
+        `[compras] PDF extract tesseract-cli: score=${score} len=${text.length} preview="${previewText(text)}"`,
       );
       if (score >= MIN_TEXT_LEN) {
-        best = { text, strategy: "tesseract-ocr", score };
+        best = { text, strategy: "tesseract-cli", score };
       }
     } catch (err) {
       if (isPasswordError(err)) throw err;
-      console.warn("[compras] PDF extract tesseract-ocr falló:", err);
+      console.warn("[compras] PDF extract tesseract-cli falló:", err);
     }
   }
 

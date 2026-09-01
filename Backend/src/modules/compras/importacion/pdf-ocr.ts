@@ -1,61 +1,48 @@
-import { createRequire } from "module";
-import path from "path";
-import { pathToFileURL } from "url";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { execFile } from "node:child_process";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 
-const require = createRequire(import.meta.url);
-const pdfjsRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
-
-function pdfJsResourceUrls() {
-  return {
-    standardFontDataUrl: pathToFileURL(path.join(pdfjsRoot, "standard_fonts/")).href,
-    cMapUrl: pathToFileURL(path.join(pdfjsRoot, "cmaps/")).href,
-    cMapPacked: true,
-  };
-}
-
-const OCR_RENDER_SCALE = 2;
+const execFileAsync = promisify(execFile);
 
 /**
  * OCR fallback for image-only PDFs (print-to-PDF / scanned invoices).
- * Renders each page with pdf.js + @napi-rs/canvas, then runs Tesseract (spa).
+ * Uses poppler + tesseract CLI so native crashes stay out of the Node process.
  */
 export async function extractWithOcr(buffer: Buffer): Promise<string> {
-  const { createCanvas } = await import("@napi-rs/canvas");
-  const { createWorker } = await import("tesseract.js");
-
-  const loadingTask = getDocument({
-    ...pdfJsResourceUrls(),
-    data: new Uint8Array(buffer),
-    isEvalSupported: false,
-    useWorkerFetch: false,
-  });
-
-  const doc = await loadingTask.promise;
-  const worker = await createWorker("spa");
-  const parts: string[] = [];
+  const dir = await mkdtemp(path.join(tmpdir(), "compras-ocr-"));
+  const pdfPath = path.join(dir, "input.pdf");
+  const imagePrefix = path.join(dir, "page");
 
   try {
-    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
-      const page = await doc.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: OCR_RENDER_SCALE });
-      const canvas = createCanvas(viewport.width, viewport.height);
-      const canvasContext = canvas.getContext("2d");
+    await writeFile(pdfPath, buffer);
 
-      await page.render({
-        canvasContext: canvasContext as unknown as CanvasRenderingContext2D,
-        viewport,
-        canvas: canvas as unknown as HTMLCanvasElement,
-      }).promise;
+    await execFileAsync("pdftoppm", ["-png", "-r", "200", pdfPath, imagePrefix], {
+      maxBuffer: 10 * 1024 * 1024,
+    });
 
-      const { data } = await worker.recognize(canvas.toBuffer("image/png"));
-      if (data.text?.trim()) parts.push(data.text.trim());
-      page.cleanup();
+    const images = (await readdir(dir))
+      .filter((name) => name.startsWith("page") && name.endsWith(".png"))
+      .sort();
+
+    if (images.length === 0) {
+      throw new Error("pdftoppm no generó imágenes");
     }
-  } finally {
-    await worker.terminate().catch(() => undefined);
-    await doc.destroy().catch(() => undefined);
-  }
 
-  return parts.join("\n\n").trim();
+    const parts: string[] = [];
+    for (const image of images) {
+      const imagePath = path.join(dir, image);
+      const { stdout } = await execFileAsync(
+        "tesseract",
+        [imagePath, "stdout", "-l", "spa", "--psm", "6"],
+        { maxBuffer: 10 * 1024 * 1024 },
+      );
+      if (stdout.trim()) parts.push(stdout.trim());
+    }
+
+    return parts.join("\n\n").trim();
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
