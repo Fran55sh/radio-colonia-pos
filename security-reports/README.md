@@ -1,37 +1,99 @@
-# Informes de seguridad — radio-colonia-pos
+# Security reports — radio-colonia-pos (estado actual)
 
-**Repo:** Fran55sh/radio-colonia-pos  
-**Fecha:** 2026-09-11  
-**Alcance:** solo documentación bajo `security-reports/` (sin cambios de código de aplicación)
+> **Fuente de verdad para remediación.** Solo hallazgos **abiertos** (PENDIENTE / PARCIAL).
+> Lo cerrado está en [`SOLUCIONADOS.md`](./SOLUCIONADOS.md).
+>
+> Última reauditoría: 2026-09-11 · `main` @ `ac4f80e` (*deploy security and bug fixes*)
+> Informe: [`_audit-full.md`](./_audit-full.md)
 
-## Índice de hallazgos accionables
+## Cómo usar (Cursor / agentes)
 
-| # | Severidad | Archivo | Prioridad |
-|---|-----------|---------|-----------|
-| 01 | 🔴 CRÍTICO | [01-critico-pin-privilegios-totales.md](./01-critico-pin-privilegios-totales.md) | P0 |
-| 02 | 🟠 ALTO | [02-alto-login-sin-rate-limit.md](./02-alto-login-sin-rate-limit.md) | P0 |
-| 03 | 🟠 ALTO | [03-alto-db-compartida-ecommerce.md](./03-alto-db-compartida-ecommerce.md) | P0 |
-| 04 | 🟠 ALTO | [04-alto-repo-publico-defaults.md](./04-alto-repo-publico-defaults.md) | P1 |
-| 05 | 🟠 ALTO | [05-alto-cola-offline-localstorage.md](./05-alto-cola-offline-localstorage.md) | P1 |
-| 06 | 🟡 MEDIO | [06-medio-security-headers.md](./06-medio-security-headers.md) | P2 |
-| 07 | 🟡 MEDIO | [07-medio-api-token-acceso-total.md](./07-medio-api-token-acceso-total.md) | P2 |
-| 08 | 🟡 MEDIO | [08-medio-health-publico.md](./08-medio-health-publico.md) | P2 |
-| 09 | 🟡 MEDIO | [09-medio-upload-pdf-compras.md](./09-medio-upload-pdf-compras.md) | P2 |
-| 10 | 🟡 MEDIO | [10-medio-jwt-sessionstorage.md](./10-medio-jwt-sessionstorage.md) | P2 |
-| 11 | 🔵 BAJO | [11-bajo-update-dinamico-clientes.md](./11-bajo-update-dinamico-clientes.md) | P3 |
-| 12 | 🔵 BAJO | [12-bajo-sin-voids-refunds.md](./12-bajo-sin-voids-refunds.md) | P3 |
-| 13 | ⚪ INFO | [13-info-dependencias-sca.md](./13-info-dependencias-sca.md) | P2 |
-| 14 | ⚖️ LEGAL | [14-legal-pii-fiscal-arca.md](./14-legal-pii-fiscal-arca.md) | P1 |
+1. Trabajar solo ítems de este README.
+2. No reabrir `SOLUCIONADOS.md`.
+3. Al cerrar: mover a `SOLUCIONADOS.md` con evidencia y borrar de aquí.
+4. Emisión **ARCA** aún no en producción — no priorizar emisión fiscal; sí mantener RBAC sobre PII/clientes.
 
-**Total hallazgos accionables:** 14  
-(Se omitió el INFO de “controles positivos”; se incluyó el INFO de dependencias por tener recomendación.)
+## Resumen
 
-## Documentos de soporte
+| Estado | Cantidad |
+|--------|----------|
+| PARCIAL | 7 |
+| PENDIENTE | 5 |
+| RESUELTO (ver SOLUCIONADOS) | 2 |
 
-- [`_audit-full.md`](./_audit-full.md) — copia del informe completo POS
-- [`_priorizado-unificado.md`](./_priorizado-unificado.md) — priorizado unificado RadioColonia + POS
+**Nota:** el repo sigue **PÚBLICO** con este playbook visible → priorizar privatizar o mover informes.
 
-## Notas
+---
 
-- No se modificó código ni configuración de la aplicación en este cambio.
-- Clasificación sugerida: uso interno.
+## PARCIAL
+
+### P-01 · RBAC incompleto / sin identidad de operador
+**Severidad orig.:** 🔴 CRÍTICO  
+**Qué quedó:** Roles `caja|compras|admin` + `requireRole` en fiscal/compras/contabilidad/clientes/analytics.  
+**Residual:** `sub` sigue `"pos"`; tokens sin `role` → `admin`; PINs compartidos (no usuarios).  
+**Hacer:** Usuarios nominados + `actor_id`; rotar `POS_JWT_SECRET` post-deploy; rechazar JWT sin `role`.
+
+### P-03 · DB compartida ecommerce
+**Severidad orig.:** 🟠 ALTO  
+**Qué quedó:** Docs `pos_app` + GRANTs en `DEPLOY.md`; examples sugieren `DB_USER=pos_app`.  
+**Residual:** Sin evidencia de rol aplicado en prod; sigue misma PostgreSQL.  
+**Hacer:** Crear/aplicar `pos_app` en prod y verificar GRANTs.
+
+### P-04 · Repo público + defaults / playbook
+**Severidad orig.:** 🟠 ALTO  
+**Qué quedó:** Placeholders `change-me-*`; `DB_HOST` genérico.  
+**Residual:** Repo **PUBLIC**; `security-reports/` indexable.  
+**Hacer:** Privatizar repo **o** sacar informes a privado; rotar secretos si defaults viejos se usaron.
+
+### P-05 · Cola offline localStorage
+**Severidad orig.:** 🟠 ALTO  
+**Qué quedó:** Sin `cliente_id`; bloqueo stock offline; clear en logout.  
+**Residual:** Cola en claro (líneas, medio de pago).  
+**Hacer:** Cifrar / minimizar payload; TTL; CSP.
+
+### P-06 · Security headers
+**Severidad orig.:** 🟡 MEDIO  
+**Qué quedó:** `@fastify/helmet` on.  
+**Residual:** `contentSecurityPolicy: false`; frontend sin headers propios.  
+**Hacer:** CSP real (API + Nitro/proxy).
+
+### P-08 · `/health` aún informativo
+**Severidad orig.:** 🟡 MEDIO  
+**Qué quedó:** Sin `database_name`.  
+**Residual:** Público con `database` + `schema_ready` + `service`.  
+**Hacer:** Liveness mínimo público; detalle solo interno/auth.
+
+### P-14 · PII fiscal / ARCA (acceso)
+**Severidad orig.:** ⚖️  
+**Qué quedó:** `/clientes` (y módulos sensibles) exigen `admin`. Emisión ARCA **no en prod**.  
+**Residual:** Repo público + sesión/cola en browser + sin operadores nominados.  
+**Hacer:** Completar P-01/P-04; al activar ARCA revisar retención/minimización con asesoría.
+
+---
+
+## PENDIENTE
+
+### N-07 · `API_TOKEN` full admin + `===`
+**Hacer:** `timingSafeEqual`; scopes; rotación; no superusuario eterno.
+
+### N-10 · JWT en `sessionStorage`
+**Hacer:** TTL más corto; HttpOnly cookie+CSRF si same-site; o revocación/`jti`; no dejar token XSS-exfiltable.
+
+### N-11 · UPDATE dinámico clientes
+**Hacer:** Whitelist explícita de columnas (no solo Zod strip).
+
+### N-12 · Voids / refunds
+**Hacer:** Si se implementan: rol admin, motivo, auditoría, asiento inverso. Si no: documentar aceptación de producto.
+
+### N-13 · SCA / Dependabot
+**Hacer:** Dependabot/Renovate + `npm audit` en CI.
+
+---
+
+## Prioridad sugerida
+
+1. Rotar JWT + no default-admin legacy (P-01)  
+2. Privatizar repo / mover reports (P-04)  
+3. Aplicar `pos_app` en prod (P-03)  
+4. `API_TOKEN` timing-safe + scopes (N-07)  
+5. Sesión/cola (N-10, P-05) · CSP (P-06) · whitelist UPDATE (N-11) · SCA (N-13)
