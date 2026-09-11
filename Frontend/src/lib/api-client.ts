@@ -84,9 +84,12 @@ export type OfflineBatchResult = {
   }>;
 };
 
+export type PosRole = "caja" | "compras" | "admin";
+
 export type LoginResult = {
   token: string;
   expires_at: string;
+  role: PosRole;
 };
 
 function handleUnauthorized(): void {
@@ -123,6 +126,12 @@ async function apiFetch<T>(
     }
     const message =
       (data as { message?: string }).message ?? "Sesión expirada o no autorizada";
+    throw new Error(message);
+  }
+
+  if (res.status === 403) {
+    const message =
+      (data as { message?: string }).message ?? "No tenés permiso para esta acción";
     throw new Error(message);
   }
 

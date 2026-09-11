@@ -70,10 +70,15 @@ El contenedor `backend` ejecuta migración y seed al iniciar (entrypoint Node, s
 | `DATABASE_URL` | Connection string PostgreSQL |
 | `PORT` | Puerto API (default 3001) |
 | `CORS_ORIGIN` | Origen del frontend |
-| `POS_ACCESS_PIN` | PIN compartido del local (**obligatorio en producción**) |
+| `POS_ACCESS_PIN` | PIN de caja (**obligatorio en producción**; no uses `1234`) |
+| `POS_ADMIN_PIN` | PIN con rol `admin` (recomendado) |
+| `POS_COMPRAS_PIN` | PIN con rol `compras` (opcional) |
+| `POS_DEFAULT_ROLE` | Rol del PIN de caja: `caja` \| `compras` \| `admin` (default `caja`) |
 | `POS_JWT_SECRET` | Secreto JWT (**obligatorio en producción**, mín. 16 chars) |
 | `POS_SESSION_HOURS` | Duración sesión (default 12) |
-| `API_TOKEN` | Opcional: Bearer para scripts/integraciones |
+| `API_TOKEN` | Opcional: Bearer para scripts (rol admin). Vacío si no se usa |
+
+Roles: `caja` < `compras` < `admin`. Compras exige ≥`compras`; analytics/contabilidad/clientes/fiscal exigen `admin`. Login tiene rate-limit + lockout tras 5 fallos.
 | `ARCA_ENABLED` | `true` para emitir en homologación |
 | `ARCA_CUIT` | CUIT emisor (11 dígitos) |
 | `ARCA_PTO_VTA` | Punto de venta ARCA |

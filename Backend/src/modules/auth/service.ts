@@ -2,8 +2,11 @@ import { createHmac, createHash, timingSafeEqual } from "crypto";
 import { env } from "../../config/env.js";
 import { AppError } from "../../middleware/errors.js";
 
-type JwtPayload = {
+export type PosRole = "caja" | "compras" | "admin";
+
+export type JwtPayload = {
   sub: string;
+  role: PosRole;
   iat: number;
   exp: number;
 };
@@ -28,7 +31,6 @@ function getJwtSecret(): string {
   if (env.NODE_ENV === "production") {
     throw new AppError(503, "AUTH_NOT_CONFIGURED", "POS_JWT_SECRET no configurado");
   }
-  // Dev fallback so local works without explicit secret when PIN is set
   return "dev-pos-jwt-secret-change-me";
 }
 
@@ -36,11 +38,19 @@ function hashPin(pin: string): Buffer {
   return createHash("sha256").update(pin, "utf8").digest();
 }
 
+function pinsEqual(expectedPin: string, actualPin: string): boolean {
+  const expected = hashPin(expectedPin);
+  const actual = hashPin(actualPin);
+  if (expected.length !== actual.length) return false;
+  return timingSafeEqual(expected, actual);
+}
+
 export function isAuthConfigured(): boolean {
   return Boolean(env.POS_ACCESS_PIN);
 }
 
-export function verifyPin(pin: string): boolean {
+/** Resolve which role a PIN unlocks. Admin PIN wins if both match. */
+export function resolveRoleForPin(pin: string): PosRole | null {
   if (!env.POS_ACCESS_PIN) {
     throw new AppError(
       503,
@@ -48,18 +58,34 @@ export function verifyPin(pin: string): boolean {
       "POS_ACCESS_PIN no está configurado",
     );
   }
-  const expected = hashPin(env.POS_ACCESS_PIN);
-  const actual = hashPin(pin);
-  if (expected.length !== actual.length) return false;
-  return timingSafeEqual(expected, actual);
+
+  if (env.POS_ADMIN_PIN && pinsEqual(env.POS_ADMIN_PIN, pin)) {
+    return "admin";
+  }
+  if (env.POS_COMPRAS_PIN && pinsEqual(env.POS_COMPRAS_PIN, pin)) {
+    return "compras";
+  }
+  if (pinsEqual(env.POS_ACCESS_PIN, pin)) {
+    return env.POS_DEFAULT_ROLE;
+  }
+  return null;
 }
 
-export function signToken(): { token: string; expiresAt: Date } {
+export function verifyPin(pin: string): boolean {
+  return resolveRoleForPin(pin) != null;
+}
+
+export function signToken(role: PosRole): { token: string; expiresAt: Date } {
   const now = Math.floor(Date.now() / 1000);
   const exp = now + env.POS_SESSION_HOURS * 3600;
   const header = b64urlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const payload = b64urlEncode(
-    JSON.stringify({ sub: "pos", iat: now, exp } satisfies JwtPayload),
+    JSON.stringify({
+      sub: "pos",
+      role,
+      iat: now,
+      exp,
+    } satisfies JwtPayload),
   );
   const secret = getJwtSecret();
   const sig = createHmac("sha256", secret)
@@ -89,7 +115,7 @@ export function verifyToken(token: string): JwtPayload {
     throw new AppError(401, "UNAUTHORIZED", "Token inválido");
   }
 
-  let parsed: JwtPayload;
+  let parsed: JwtPayload & { role?: PosRole };
   try {
     parsed = JSON.parse(b64urlDecode(payload).toString("utf8")) as JwtPayload;
   } catch {
@@ -102,13 +128,61 @@ export function verifyToken(token: string): JwtPayload {
   if (parsed.exp < Math.floor(Date.now() / 1000)) {
     throw new AppError(401, "UNAUTHORIZED", "Sesión expirada");
   }
-  return parsed;
+
+  const role = parsed.role ?? "admin";
+  if (role !== "caja" && role !== "compras" && role !== "admin") {
+    throw new AppError(401, "UNAUTHORIZED", "Token inválido");
+  }
+
+  return { ...parsed, role };
 }
 
-export function loginWithPin(pin: string): { token: string; expires_at: string } {
-  if (!verifyPin(pin)) {
+export function loginWithPin(pin: string): {
+  token: string;
+  expires_at: string;
+  role: PosRole;
+} {
+  const role = resolveRoleForPin(pin);
+  if (!role) {
     throw new AppError(401, "INVALID_PIN", "PIN incorrecto");
   }
-  const { token, expiresAt } = signToken();
-  return { token, expires_at: expiresAt.toISOString() };
+  const { token, expiresAt } = signToken(role);
+  return { token, expires_at: expiresAt.toISOString(), role };
+}
+
+/** In-memory lockout for login brute-force (per process). */
+const loginFailures = new Map<
+  string,
+  { count: number; lockedUntil: number }
+>();
+
+const MAX_FAILURES = 5;
+const LOCKOUT_MS = 15 * 60 * 1000;
+
+export function assertLoginAllowed(key: string): void {
+  const entry = loginFailures.get(key);
+  if (!entry) return;
+  if (entry.lockedUntil > Date.now()) {
+    const secs = Math.ceil((entry.lockedUntil - Date.now()) / 1000);
+    throw new AppError(
+      429,
+      "LOGIN_LOCKED",
+      `Demasiados intentos. Reintentá en ${secs}s`,
+    );
+  }
+}
+
+export function recordLoginFailure(key: string): void {
+  const entry = loginFailures.get(key) ?? { count: 0, lockedUntil: 0 };
+  if (entry.lockedUntil > Date.now()) return;
+  entry.count += 1;
+  if (entry.count >= MAX_FAILURES) {
+    entry.lockedUntil = Date.now() + LOCKOUT_MS;
+    entry.count = 0;
+  }
+  loginFailures.set(key, entry);
+}
+
+export function clearLoginFailures(key: string): void {
+  loginFailures.delete(key);
 }

@@ -17,7 +17,7 @@ import {
   type NormalizedInvoice,
   type ProductoCaja,
 } from "@/lib/api-client";
-import { isAuthenticated, setAuthRequired } from "@/lib/auth-session";
+import { hasRoleAtLeast, isAuthenticated, setAuthRequired } from "@/lib/auth-session";
 
 type WizardStep = "upload" | "processing" | "review" | "done";
 type UploadMode = "pdf" | "text";
@@ -37,6 +37,9 @@ export const Route = createFileRoute("/compras/importar")({
     } catch (e) {
       if (e && typeof e === "object" && "to" in e) throw e;
       if (!isAuthenticated()) throw redirect({ to: "/login" });
+    }
+    if (!hasRoleAtLeast("compras")) {
+      throw redirect({ to: "/" });
     }
   },
   component: ImportarFacturaWizard,

@@ -16,7 +16,7 @@ import {
   type NormalizedInvoice,
   type ProductoCaja,
 } from "@/lib/api-client";
-import { isAuthenticated, setAuthRequired } from "@/lib/auth-session";
+import { hasRoleAtLeast, isAuthenticated, setAuthRequired } from "@/lib/auth-session";
 
 export const Route = createFileRoute("/compras/facturas/nueva")({
   validateSearch: (search: Record<string, unknown>): { id?: string } => ({
@@ -33,6 +33,9 @@ export const Route = createFileRoute("/compras/facturas/nueva")({
     } catch (e) {
       if (e && typeof e === "object" && "to" in e) throw e;
       if (!isAuthenticated()) throw redirect({ to: "/login" });
+    }
+    if (!hasRoleAtLeast("compras")) {
+      throw redirect({ to: "/" });
     }
   },
   component: FacturaManualPage,

@@ -6,7 +6,7 @@ import {
   fetchImportaciones,
   fetchOrdenesCompra,
 } from "@/lib/api-client";
-import { isAuthenticated, setAuthRequired } from "@/lib/auth-session";
+import { isAuthenticated, hasRoleAtLeast, setAuthRequired } from "@/lib/auth-session";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/compras/")({
@@ -21,6 +21,9 @@ export const Route = createFileRoute("/compras/")({
     } catch (e) {
       if (e && typeof e === "object" && "to" in e) throw e;
       if (!isAuthenticated()) throw redirect({ to: "/login" });
+    }
+    if (!hasRoleAtLeast("compras")) {
+      throw redirect({ to: "/" });
     }
   },
   component: ComprasHome,

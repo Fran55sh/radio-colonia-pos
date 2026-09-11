@@ -62,12 +62,40 @@ Variables obligatorias del POS:
 
 | Variable | Descripción |
 |----------|-------------|
-| `DB_*` | Copiadas del ecommerce |
+| `DB_*` | Copiadas del ecommerce **o** usuario `pos_app` least-privilege (ver abajo) |
 | `CORS_ORIGIN` | URL pública del frontend POS |
-| `POS_ACCESS_PIN` | PIN compartido de caja (**obligatorio**) |
-| `POS_JWT_SECRET` | Secreto JWT (**obligatorio**, mín. 16 chars) |
+| `POS_ACCESS_PIN` | PIN de caja (**obligatorio**; alfanumérico largo en prod; no `1234`) |
+| `POS_ADMIN_PIN` | PIN con rol admin (recomendado; compras+analytics+contabilidad+clientes+fiscal) |
+| `POS_COMPRAS_PIN` | Opcional; rol compras |
+| `POS_DEFAULT_ROLE` | Rol del PIN de caja: `caja` (default), `compras` o `admin` |
+| `POS_JWT_SECRET` | Secreto JWT (**obligatorio**, mín. 16 chars; rotar si se filtró) |
 | `POS_SESSION_HOURS` | Duración sesión (default 12) |
-| `API_TOKEN` | Opcional (scripts) |
+| `API_TOKEN` | Opcional (scripts → rol admin). Vacío si no se usa |
+
+### 3b. Usuario Postgres least-privilege (`pos_app`)
+
+El POS y el ecommerce comparten la misma base (stock/costos). **No** separar bases. Mitigá el blast radius con un rol de app dedicado:
+
+```sql
+-- Como superuser / owner de la DB
+CREATE ROLE pos_app LOGIN PASSWORD '<fuerte>';
+GRANT CONNECT ON DATABASE postgres TO pos_app;  -- o el DB_NAME real
+GRANT USAGE ON SCHEMA public TO pos_app;
+
+-- Tablas operativas POS
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO pos_app;
+-- Idealmente restringí a: pos_ventas, pos_lineas_venta, pos_iva_registro,
+-- pos_clientes, pos_compras_*, pos_comprobantes_fiscales, etc.
+
+-- Catálogo compartido: solo lo que el POS necesita escribir/leer
+GRANT SELECT ON products, categories, global_attributes TO pos_app;
+GRANT SELECT, UPDATE (stock, cost_price) ON product_variants TO pos_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON product_supplier_offers, suppliers TO pos_app;
+```
+
+En Coolify: `DB_USER=pos_app` y el password propio. Si hoy usás el mismo user que el ecommerce, documentá la migración y rotá cuando puedas.
+
+**Rotación:** si el repo público o un ejemplo de compose se usó en deploy, rotá `POS_ACCESS_PIN`, `POS_ADMIN_PIN`, `POS_JWT_SECRET` y passwords de DB.
 
 ### 4. Arranque del backend POS
 

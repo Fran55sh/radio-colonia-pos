@@ -19,13 +19,16 @@ import {
 import {
   clearToken,
   getAuthRequired,
+  hasRoleAtLeast,
   isAuthenticated,
   setAuthRequired,
 } from "@/lib/auth-session";
 import { formatARS } from "@/lib/format-money";
 import { resolveUnitPrice, priceRange } from "@/lib/quantity-pricing";
 import {
+  clearOfflineQueue,
   enqueueSale,
+  exceedsKnownStock,
   generateClientSaleId,
   loadOfflineQueue,
   removeFromQueue,
@@ -443,10 +446,27 @@ function POS() {
           const available = product?.stock;
           if (available != null && item.qty > available) {
             flash(
-              `Atención: ${item.codigo_interno} supera stock disponible (${available}). Venta guardada offline.`,
+              `Atención: ${item.codigo_interno} supera stock disponible (${available}).`,
             );
           }
         }
+      };
+
+      const tryEnqueueOffline = (): boolean => {
+        const stockCheck = exceedsKnownStock(lineas, catalog);
+        if (!stockCheck.ok) {
+          flash(
+            `No se puede guardar offline: ${stockCheck.sku} supera stock (${stockCheck.available}).`,
+          );
+          return false;
+        }
+        enqueueSale({
+          ...payload,
+          sincronizada_offline: true,
+          queued_at: new Date().toISOString(),
+        });
+        setPendingOffline(loadOfflineQueue().length);
+        return true;
       };
 
       const patchCatalogStock = () => {
@@ -466,8 +486,7 @@ function POS() {
       try {
         if (!online) {
           warnOfflineStock();
-          enqueueSale({ ...payload, sincronizada_offline: true, queued_at: new Date().toISOString() });
-          setPendingOffline(loadOfflineQueue().length);
+          if (!tryEnqueueOffline()) return;
           flash(`Venta guardada offline: ${method} — ${formatARS(saleTotal)}`);
           resetAfterSale();
           return;
@@ -490,8 +509,7 @@ function POS() {
           void refetch();
         } else if (!online || msg.includes("fetch")) {
           warnOfflineStock();
-          enqueueSale({ ...payload, sincronizada_offline: true, queued_at: new Date().toISOString() });
-          setPendingOffline(loadOfflineQueue().length);
+          if (!tryEnqueueOffline()) return;
           flash(`Venta en cola offline: ${method}`);
           resetAfterSale();
         } else {
@@ -561,9 +579,13 @@ function POS() {
   };
 
   const handleLogout = () => {
+    clearOfflineQueue();
+    setPendingOffline(0);
     clearToken();
     void navigate({ to: "/login" });
   };
+
+  const canAccessCompras = hasRoleAtLeast("compras");
 
   const connectionBadge = (
     <button
@@ -626,14 +648,16 @@ function POS() {
             <RefreshCw className={`size-3.5 ${isLoading ? "animate-spin" : ""}`} />
           </button>
 
-          <Link
-            to="/compras"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border text-xs text-silver hover:text-silver-light hover:bg-charcoal"
-            title="Compras e importación de facturas"
-          >
-            <Package className="size-3.5" />
-            Compras
-          </Link>
+          {canAccessCompras && (
+            <Link
+              to="/compras"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border text-xs text-silver hover:text-silver-light hover:bg-charcoal"
+              title="Compras e importación de facturas"
+            >
+              <Package className="size-3.5" />
+              Compras
+            </Link>
+          )}
 
           {connectionBadge}
 
@@ -691,17 +715,19 @@ function POS() {
                   Actualizar catálogo
                 </Button>
 
-                <Button
-                  variant="outline"
-                  className="justify-start border-border text-silver-light gap-2"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    void navigate({ to: "/compras" });
-                  }}
-                >
-                  <Package className="size-4" />
-                  Compras
-                </Button>
+                {canAccessCompras && (
+                  <Button
+                    variant="outline"
+                    className="justify-start border-border text-silver-light gap-2"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      void navigate({ to: "/compras" });
+                    }}
+                  >
+                    <Package className="size-4" />
+                    Compras
+                  </Button>
+                )}
 
                 <Button
                   variant="outline"

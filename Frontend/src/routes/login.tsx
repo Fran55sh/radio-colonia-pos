@@ -56,7 +56,7 @@ function LoginPage() {
     try {
       const result = await login(pin.trim());
       setAuthRequired(true);
-      setToken(result.token, result.expires_at);
+      setToken(result.token, result.expires_at, result.role);
       await navigate({ to: "/" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo iniciar sesión");

@@ -37,8 +37,10 @@ services:
       PORT: 3001
       HOST: 0.0.0.0
       CORS_ORIGIN: http://localhost:5173,http://localhost:8080
-      POS_ACCESS_PIN: "1234"
-      POS_JWT_SECRET: "dev-pos-jwt-secret-change-me"
+      POS_ACCESS_PIN: "${POS_ACCESS_PIN:-change-me-caja-pin}"
+      POS_ADMIN_PIN: "${POS_ADMIN_PIN:-change-me-admin-pin}"
+      POS_DEFAULT_ROLE: "${POS_DEFAULT_ROLE:-caja}"
+      POS_JWT_SECRET: "${POS_JWT_SECRET:-change-me-jwt-secret-min-16}"
       POS_SESSION_HOURS: "12"
     ports:
       - "3001:3001"
