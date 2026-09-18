@@ -13,6 +13,7 @@ export const createSaleSchema = z.object({
   medio_pago: z.string().min(1).max(64),
   lineas: z.array(saleLineSchema).min(1),
   sincronizada_offline: z.boolean().optional().default(false),
+  caja_sesion_id: z.number().int().positive().optional(),
 });
 
 export const offlineBatchSchema = z.object({

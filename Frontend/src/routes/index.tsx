@@ -3,7 +3,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { LogOut, Trash2, Wifi, WifiOff, ScanLine, Plus, RefreshCw, Menu, ChevronLeft, Package } from "lucide-react";
 import { CustomerSelector } from "@/components/pos/CustomerSelector";
+import { CashMovementDialog } from "@/components/pos/CashMovementDialog";
+import { CashSessionBanner } from "@/components/pos/CashSessionBanner";
+import { CloseRegisterDialog } from "@/components/pos/CloseRegisterDialog";
 import { FiscalResultDialog } from "@/components/pos/FiscalResultDialog";
+import { OpenRegisterDialog } from "@/components/pos/OpenRegisterDialog";
 import { PosClock } from "@/components/pos/PosClock";
 import {
   checkApiConnection,
@@ -33,6 +37,7 @@ import {
   loadOfflineQueue,
   removeFromQueue,
 } from "@/lib/offline-queue";
+import { useCashSession } from "@/hooks/useCashSession";
 import {
   Dialog,
   DialogContent,
@@ -207,6 +212,8 @@ function POS() {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
   }, []);
+
+  const cash = useCashSession({ online, onFlash: flash });
 
   const syncOfflineQueue = useCallback(async () => {
     const queue = loadOfflineQueue();
@@ -421,6 +428,15 @@ function POS() {
         flash("Carrito vacío");
         return;
       }
+      if (cash.sesionId == null) {
+        flash(
+          cash.isPrincipal
+            ? "Abrí la caja antes de cobrar"
+            : "La caja no está abierta en el puesto",
+        );
+        if (cash.isPrincipal) cash.setOpenDialog(true);
+        return;
+      }
       if (processing) return;
       setProcessing(true);
 
@@ -436,6 +452,7 @@ function POS() {
         cliente_id: selectedCliente?.id,
         medio_pago: method,
         lineas,
+        caja_sesion_id: cash.sesionId,
       };
 
       const warnOfflineStock = () => {
@@ -453,6 +470,12 @@ function POS() {
       };
 
       const tryEnqueueOffline = (): boolean => {
+        if (cash.sesionId == null) {
+          flash(
+            "Sin sesión de caja cacheada: no se puede vender offline. Conectá y abrí/adjuntá la caja.",
+          );
+          return false;
+        }
         const stockCheck = exceedsKnownStock(lineas, catalog);
         if (!stockCheck.ok) {
           flash(
@@ -460,11 +483,17 @@ function POS() {
           );
           return false;
         }
-        enqueueSale({
-          ...payload,
-          sincronizada_offline: true,
-          queued_at: new Date().toISOString(),
-        });
+        try {
+          enqueueSale({
+            ...payload,
+            caja_sesion_id: cash.sesionId,
+            sincronizada_offline: true,
+            queued_at: new Date().toISOString(),
+          });
+        } catch (err) {
+          flash(err instanceof Error ? err.message : "No se pudo encolar offline");
+          return false;
+        }
         setPendingOffline(loadOfflineQueue().length);
         return true;
       };
@@ -519,7 +548,20 @@ function POS() {
         setProcessing(false);
       }
     },
-    [cart, catalog, online, processing, flash, resetAfterSale, queryClient, refetch, selectedCliente],
+    [
+      cart,
+      catalog,
+      online,
+      processing,
+      flash,
+      resetAfterSale,
+      queryClient,
+      refetch,
+      selectedCliente,
+      cash.sesionId,
+      cash.isPrincipal,
+      cash.setOpenDialog,
+    ],
   );
 
   useEffect(() => {
@@ -625,7 +667,27 @@ function POS() {
           </div>
           <div className="leading-tight min-w-0 hidden sm:block">
             <div className="text-sm font-semibold text-silver-light truncate">Radio Colonia POS</div>
-            <div className="text-[11px] text-silver">Caja 01 · Omnicanal</div>
+            <CashSessionBanner
+              sesionId={cash.sesionId}
+              puesto={cash.puesto}
+              modo={cash.modo}
+              waitingForOpen={cash.waitingForOpen}
+              onAbrir={() => cash.setOpenDialog(true)}
+              onRetiro={() => cash.setMovementDialog(true)}
+              onCerrar={() => cash.setCloseDialog(true)}
+            />
+          </div>
+          {/* Mobile: compact session status */}
+          <div className="sm:hidden min-w-0">
+            <CashSessionBanner
+              sesionId={cash.sesionId}
+              puesto={cash.puesto}
+              modo={cash.modo}
+              waitingForOpen={cash.waitingForOpen}
+              onAbrir={() => cash.setOpenDialog(true)}
+              onRetiro={() => cash.setMovementDialog(true)}
+              onCerrar={() => cash.setCloseDialog(true)}
+            />
           </div>
         </div>
 
@@ -693,6 +755,28 @@ function POS() {
                 <SheetTitle className="text-silver-light">Menú caja</SheetTitle>
               </SheetHeader>
               <div className="mt-6 flex flex-col gap-4">
+                <div className="space-y-2">
+                  <div className="text-[11px] uppercase tracking-widest text-silver font-bold">Sesión de caja</div>
+                  <CashSessionBanner
+                    sesionId={cash.sesionId}
+                    puesto={cash.puesto}
+                    modo={cash.modo}
+                    waitingForOpen={cash.waitingForOpen}
+                    onAbrir={() => {
+                      cash.setOpenDialog(true);
+                      setMenuOpen(false);
+                    }}
+                    onRetiro={() => {
+                      cash.setMovementDialog(true);
+                      setMenuOpen(false);
+                    }}
+                    onCerrar={() => {
+                      cash.setCloseDialog(true);
+                      setMenuOpen(false);
+                    }}
+                  />
+                </div>
+
                 <div className="space-y-2">
                   <div className="text-[11px] uppercase tracking-widest text-silver font-bold">Cliente</div>
                   {showCustomerInSheet && customerSelector}
@@ -923,9 +1007,9 @@ function POS() {
               </div>
             </div>
             <div className="grid grid-cols-1 gap-0 mt-2">
-              <PayBtn label="F8" name="Efectivo" onClick={() => void handlePay("Efectivo")} disabled={processing || cart.length === 0} hideShortcut />
-              <PayBtn label="F9" name="Débito/Crédito" onClick={() => void handlePay("Débito/Crédito")} disabled={processing || cart.length === 0} hideShortcut />
-              <PayBtn label="F10" name="Mercado Pago QR" onClick={() => void handlePay("Mercado Pago QR")} primary disabled={processing || cart.length === 0} hideShortcut />
+              <PayBtn label="F8" name="Efectivo" onClick={() => void handlePay("Efectivo")} disabled={processing || cart.length === 0 || !cash.canSell} hideShortcut />
+              <PayBtn label="F9" name="Débito/Crédito" onClick={() => void handlePay("Débito/Crédito")} disabled={processing || cart.length === 0 || !cash.canSell} hideShortcut />
+              <PayBtn label="F10" name="Mercado Pago QR" onClick={() => void handlePay("Mercado Pago QR")} primary disabled={processing || cart.length === 0 || !cash.canSell} hideShortcut />
             </div>
           </div>
         </section>
@@ -1089,9 +1173,9 @@ function POS() {
           </div>
 
           <div className="grid grid-cols-3 gap-0">
-            <PayBtn label="F8" name="Efectivo" onClick={() => void handlePay("Efectivo")} disabled={processing} />
-            <PayBtn label="F9" name="Débito/Crédito" onClick={() => void handlePay("Débito/Crédito")} disabled={processing} />
-            <PayBtn label="F10" name="Mercado Pago QR" onClick={() => void handlePay("Mercado Pago QR")} primary disabled={processing} />
+            <PayBtn label="F8" name="Efectivo" onClick={() => void handlePay("Efectivo")} disabled={processing || !cash.canSell} />
+            <PayBtn label="F9" name="Débito/Crédito" onClick={() => void handlePay("Débito/Crédito")} disabled={processing || !cash.canSell} />
+            <PayBtn label="F10" name="Mercado Pago QR" onClick={() => void handlePay("Mercado Pago QR")} primary disabled={processing || !cash.canSell} />
           </div>
         </div>
       </footer>
@@ -1111,6 +1195,29 @@ function POS() {
         formatMoney={formatARS}
         onFiscalUpdated={setLastFiscal}
       />
+
+      <OpenRegisterDialog
+        open={cash.openDialog}
+        onOpenChange={cash.setOpenDialog}
+        onOpened={cash.handleOpened}
+      />
+
+      {cash.sesionId != null && (
+        <>
+          <CashMovementDialog
+            open={cash.movementDialog}
+            onOpenChange={cash.setMovementDialog}
+            sesionId={cash.sesionId}
+            onDone={flash}
+          />
+          <CloseRegisterDialog
+            open={cash.closeDialog}
+            onOpenChange={cash.setCloseDialog}
+            sesionId={cash.sesionId}
+            onClosed={cash.handleClosed}
+          />
+        </>
+      )}
 
       <Dialog open={pendingProduct !== null} onOpenChange={(open) => { if (!open) closeQtyDialog(); }}>
         <DialogContent

@@ -13,6 +13,8 @@ export function getArcaClient(): Arca | null {
       cert: config.cert,
       key: config.key,
       production: config.production,
+      retries: 3,
+      retryDelayMs: 2_000,
       onEvent: (e) => {
         if (e.type === "request:error") {
           console.warn("[ARCA]", e.type, e);

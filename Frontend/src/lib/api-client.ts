@@ -63,6 +63,7 @@ export type CreateSalePayload = {
   medio_pago: string;
   lineas: SaleLine[];
   sincronizada_offline?: boolean;
+  caja_sesion_id?: number;
 };
 
 export type CreateSaleResult = {
@@ -70,6 +71,7 @@ export type CreateSaleResult = {
   total: number;
   client_sale_id?: string;
   fiscal?: FiscalResult | null;
+  caja_movimiento_id?: number;
 };
 
 export type OfflineBatchResult = {
@@ -225,6 +227,127 @@ export async function syncOfflineVentas(
   return apiFetch<OfflineBatchResult>("/pos/ventas/offline-batch", {
     method: "POST",
     body: JSON.stringify({ ventas }),
+  });
+}
+
+/* —— Control de caja —— */
+
+export type CajaOpeningBalance = {
+  payment_method: string;
+  amount: number;
+};
+
+export type CajaSesion = {
+  id: number;
+  puesto: string;
+  estado: "abierta" | "cerrada" | "cancelada";
+  opened_at: string;
+  opened_by_label: string | null;
+  closed_at: string | null;
+  closed_by_label: string | null;
+  notes: string | null;
+  saldos?: CajaOpeningBalance[];
+};
+
+export type CajaResumen = {
+  sesion_id: number;
+  puesto: string;
+  estado: string;
+  expected_cash: number;
+  by_payment_method: Record<
+    string,
+    { opening: number; ingresos: number; egresos: number; net: number }
+  >;
+};
+
+export type CajaMovimiento = {
+  id: number;
+  sesion_id: number;
+  occurred_at: string;
+  tipo: string;
+  direccion: string;
+  amount: number;
+  payment_method: string;
+  description: string | null;
+  source_type: string;
+  source_id: string | null;
+  estado: string;
+  post_cierre_offline: boolean;
+};
+
+/** Returns null when no open session (404). */
+export async function fetchSesionActual(
+  puesto = "Caja 01",
+): Promise<CajaSesion | null> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const q = `?puesto=${encodeURIComponent(puesto)}`;
+  const res = await fetch(`${API_BASE}/caja/sesiones/actual${q}`, { headers });
+  if (res.status === 404) return null;
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) {
+    handleUnauthorized();
+    throw new Error((data as { message?: string }).message ?? "Sesión expirada");
+  }
+  if (!res.ok) {
+    throw new Error(
+      (data as { message?: string }).message ??
+        (data as { error?: string }).error ??
+        `Error HTTP ${res.status}`,
+    );
+  }
+  return data as CajaSesion;
+}
+
+export async function abrirSesionCaja(input: {
+  puesto?: string;
+  saldos: CajaOpeningBalance[];
+  notes?: string;
+}): Promise<CajaSesion> {
+  return apiFetch<CajaSesion>("/caja/sesiones/abrir", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function fetchCajaResumen(sesionId: number): Promise<CajaResumen> {
+  return apiFetch<CajaResumen>(`/caja/sesiones/${sesionId}/resumen`);
+}
+
+export async function crearMovimientoCaja(input: {
+  sesion_id: number;
+  tipo: "ingreso_manual" | "retiro" | "gasto";
+  amount: number;
+  payment_method: string;
+  description?: string;
+  admin_pin?: string;
+}): Promise<{ movimiento: CajaMovimiento; warning?: string }> {
+  return apiFetch("/caja/movimientos", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function cerrarSesionCaja(
+  sesionId: number,
+  input: {
+    counted_cash: number;
+    categoria?: string;
+    observations?: string;
+    admin_pin?: string;
+  },
+): Promise<{
+  sesion: CajaSesion;
+  diferencia: {
+    expected_cash: number;
+    counted_cash: number;
+    difference: number;
+  };
+}> {
+  return apiFetch(`/caja/sesiones/${sesionId}/cerrar`, {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 }
 

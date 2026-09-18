@@ -70,6 +70,7 @@ Variables obligatorias del POS:
 | `POS_DEFAULT_ROLE` | Rol del PIN de caja: `caja` (default), `compras` o `admin` |
 | `POS_JWT_SECRET` | Secreto JWT (**obligatorio**, mín. 16 chars; rotar si se filtró) |
 | `POS_SESSION_HOURS` | Duración sesión (default 12) |
+| `POS_CAJA_REQUIRE_SESSION` | `true`/`false` — exigir sesión de caja abierta para vender (default `false` en código; compose lo setea `true`) |
 | `API_TOKEN` | Opcional (scripts → rol admin). Vacío si no se usa |
 
 ### 3b. Usuario Postgres least-privilege (`pos_app`)
@@ -85,7 +86,7 @@ GRANT USAGE ON SCHEMA public TO pos_app;
 -- Tablas operativas POS
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO pos_app;
 -- Idealmente restringí a: pos_ventas, pos_lineas_venta, pos_iva_registro,
--- pos_clientes, pos_compras_*, pos_comprobantes_fiscales, etc.
+-- pos_clientes, pos_compras_*, pos_comprobantes_fiscales, pos_caja_*, etc.
 
 -- Catálogo compartido: solo lo que el POS necesita escribir/leer
 GRANT SELECT ON products, categories, global_attributes TO pos_app;

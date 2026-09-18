@@ -75,6 +75,30 @@ export function verifyPin(pin: string): boolean {
   return resolveRoleForPin(pin) != null;
 }
 
+/**
+ * Revalida el PIN admin mid-session (retiros / cierre con diferencia).
+ * No usa el JWT: exige el PIN configurado en POS_ADMIN_PIN.
+ */
+export function assertAdminPin(pin: string | undefined | null): void {
+  if (!pin || typeof pin !== "string" || pin.length < 4) {
+    throw new AppError(
+      403,
+      "CAJA_PIN_INVALIDO",
+      "PIN admin requerido",
+    );
+  }
+  if (!env.POS_ADMIN_PIN) {
+    throw new AppError(
+      503,
+      "AUTH_NOT_CONFIGURED",
+      "POS_ADMIN_PIN no está configurado",
+    );
+  }
+  if (!pinsEqual(env.POS_ADMIN_PIN, pin)) {
+    throw new AppError(403, "CAJA_PIN_INVALIDO", "PIN admin incorrecto");
+  }
+}
+
 export function signToken(role: PosRole): { token: string; expiresAt: Date } {
   const now = Math.floor(Date.now() / 1000);
   const exp = now + env.POS_SESSION_HOURS * 3600;

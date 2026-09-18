@@ -5,6 +5,8 @@ const STORAGE_KEY = "radio-colonia-pos-offline-queue";
 export type QueuedSale = CreateSalePayload & {
   client_sale_id: string;
   queued_at: string;
+  /** Obligatorio para D-OFF: sin id no se encola. */
+  caja_sesion_id: number;
 };
 
 export function loadOfflineQueue(): QueuedSale[] {
@@ -27,11 +29,21 @@ export function clearOfflineQueue(): void {
   localStorage.removeItem(STORAGE_KEY);
 }
 
-/** Encola venta sin PII de cliente (sin cliente_id). */
+/**
+ * Encola venta sin PII de cliente (sin cliente_id).
+ * Requiere caja_sesion_id (D-OFF); lanza si falta.
+ */
 export function enqueueSale(sale: QueuedSale) {
+  if (sale.caja_sesion_id == null || !Number.isFinite(sale.caja_sesion_id)) {
+    throw new Error("No se puede guardar offline sin sesión de caja");
+  }
   const queue = loadOfflineQueue();
   const { cliente_id: _omit, ...safe } = sale;
-  queue.push({ ...safe, sincronizada_offline: true });
+  queue.push({
+    ...safe,
+    sincronizada_offline: true,
+    caja_sesion_id: sale.caja_sesion_id,
+  });
   saveOfflineQueue(queue);
 }
 

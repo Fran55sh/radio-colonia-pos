@@ -1,5 +1,6 @@
 import type { DbClient } from "../../config/db.js";
 import { pool, withTransaction } from "../../config/db.js";
+import { env } from "../../config/env.js";
 import {
   formatPosProductName,
   listCatalogForPos,
@@ -9,7 +10,13 @@ import {
 import { DEFAULT_IVA_ALICUOTA } from "../../lib/constants.js";
 import { splitPriceWithIva } from "../../lib/iva.js";
 import { resolveUnitPrice } from "../../lib/quantity-pricing.js";
+import type { AuthContext } from "../../middleware/auth.js";
 import { AppError } from "../../middleware/errors.js";
+import {
+  actorLabel,
+  ensureSaleMovimiento,
+  resolveSesionForSale,
+} from "../caja/service.js";
 import { getClienteFiscalById } from "../clientes/service.js";
 import { maybeEmitirDespuesDeVenta } from "../fiscal/service.js";
 import type { ComprobanteFiscalResponse } from "../fiscal/types.js";
@@ -22,6 +29,7 @@ export type SaleResult = {
   total: number;
   client_sale_id?: string;
   fiscal?: ComprobanteFiscalResponse | null;
+  caja_movimiento_id?: number;
 };
 
 type LineaDetalle = {
@@ -42,13 +50,28 @@ type LineaDetalle = {
 
 async function findVentaByClientSaleId(
   clientSaleId: string,
-): Promise<{ id: number; total: number } | null> {
-  const dup = await pool.query<{ id: number; total: string }>(
-    `SELECT id, total FROM pos_ventas WHERE client_sale_id = $1`,
+): Promise<{
+  id: number;
+  total: number;
+  caja_sesion_id: number | null;
+  medio_pago: string;
+} | null> {
+  const dup = await pool.query<{
+    id: number;
+    total: string;
+    caja_sesion_id: number | null;
+    medio_pago: string;
+  }>(
+    `SELECT id, total, caja_sesion_id, medio_pago FROM pos_ventas WHERE client_sale_id = $1`,
     [clientSaleId],
   );
   if (dup.rows.length === 0) return null;
-  return { id: dup.rows[0].id, total: Number(dup.rows[0].total) };
+  return {
+    id: dup.rows[0].id,
+    total: Number(dup.rows[0].total),
+    caja_sesion_id: dup.rows[0].caja_sesion_id,
+    medio_pago: dup.rows[0].medio_pago,
+  };
 }
 
 async function validateClienteId(clienteId: number | undefined): Promise<void> {
@@ -59,6 +82,7 @@ async function validateClienteId(clienteId: number | undefined): Promise<void> {
 async function registerSaleInTransaction(
   client: DbClient,
   input: CreateSaleInput,
+  cajaSesionId?: number | null,
 ): Promise<{ ventaId: number; totalVenta: number }> {
   let netoTotal = 0;
   let ivaTotal = 0;
@@ -119,8 +143,8 @@ async function registerSaleInTransaction(
   const ventaInsert = await client.query<{ id: number }>(
     `INSERT INTO pos_ventas (
       client_sale_id, cliente_id, canal, medio_pago, estado,
-      neto_gravado, iva_total, exento, total, sincronizada_offline
-    ) VALUES ($1, $2, 'pos', $3, 'completada', $4, $5, $6, $7, $8)
+      neto_gravado, iva_total, exento, total, sincronizada_offline, caja_sesion_id
+    ) VALUES ($1, $2, 'pos', $3, 'completada', $4, $5, $6, $7, $8, $9)
     RETURNING id`,
     [
       input.client_sale_id ?? null,
@@ -131,6 +155,7 @@ async function registerSaleInTransaction(
       exentoTotal,
       totalVenta,
       input.sincronizada_offline ?? false,
+      cajaSesionId ?? null,
     ],
   );
   const ventaId = ventaInsert.rows[0].id;
@@ -176,15 +201,40 @@ export async function listProductosCaja(client: DbClient): Promise<ProductoCaja[
   return listCatalogForPos(client);
 }
 
+export type ProcessSaleOpts = {
+  skipFiscal?: boolean;
+  authContext?: AuthContext;
+};
+
 export async function processSale(
   input: CreateSaleInput,
-  opts?: { skipFiscal?: boolean },
+  opts?: ProcessSaleOpts,
 ): Promise<SaleResult> {
+  // Resolve caja session BEFORE touching stock (D-FLAG / CAJA_SIN_SESION).
+  const resolved = await resolveSesionForSale({
+    caja_sesion_id: input.caja_sesion_id,
+    sincronizada_offline: input.sincronizada_offline === true,
+    requireSession: env.POS_CAJA_REQUIRE_SESSION,
+  });
+
   await validateClienteId(input.cliente_id);
 
   if (input.client_sale_id) {
     const existing = await findVentaByClientSaleId(input.client_sale_id);
     if (existing) {
+      let cajaMovimientoId: number | undefined;
+      if (existing.caja_sesion_id != null) {
+        const ensured = await withTransaction(async (client) =>
+          ensureSaleMovimiento(client, {
+            sesion_id: existing.caja_sesion_id!,
+            amount: existing.total,
+            payment_method: existing.medio_pago,
+            source_id: String(existing.id),
+            created_by_label: actorLabel(opts?.authContext),
+          }),
+        );
+        cajaMovimientoId = ensured.row.id;
+      }
       const fiscal = await maybeEmitirDespuesDeVenta(existing.id, {
         skipFiscal: false,
       });
@@ -192,12 +242,38 @@ export async function processSale(
         venta_id: existing.id,
         total: existing.total,
         fiscal,
+        caja_movimiento_id: cajaMovimientoId,
       });
     }
   }
 
-  const { ventaId, totalVenta } = await withTransaction((client) =>
-    registerSaleInTransaction(client, input),
+  const label = actorLabel(opts?.authContext);
+
+  const { ventaId, totalVenta, cajaMovimientoId } = await withTransaction(
+    async (client) => {
+      const sale = await registerSaleInTransaction(
+        client,
+        input,
+        resolved?.sesion_id ?? null,
+      );
+      let movId: number | undefined;
+      if (resolved) {
+        const ensured = await ensureSaleMovimiento(client, {
+          sesion_id: resolved.sesion_id,
+          amount: sale.totalVenta,
+          payment_method: input.medio_pago,
+          source_id: String(sale.ventaId),
+          created_by_label: label,
+          post_cierre_offline: resolved.post_cierre_offline,
+        });
+        movId = ensured.row.id;
+      }
+      return {
+        ventaId: sale.ventaId,
+        totalVenta: sale.totalVenta,
+        cajaMovimientoId: movId,
+      };
+    },
   );
 
   const fiscal = await maybeEmitirDespuesDeVenta(ventaId, {
@@ -209,11 +285,13 @@ export async function processSale(
     total: totalVenta,
     client_sale_id: input.client_sale_id,
     fiscal,
+    caja_movimiento_id: cajaMovimientoId,
   };
 }
 
 export async function processOfflineBatch(
   ventas: CreateSaleInput[],
+  authContext?: AuthContext,
 ): Promise<{
   procesadas: number;
   duplicadas: number;
@@ -242,7 +320,7 @@ export async function processOfflineBatch(
           ...venta,
           sincronizada_offline: true,
         },
-        { skipFiscal: true },
+        { skipFiscal: true, authContext },
       );
       procesadas++;
       if (venta.client_sale_id) {

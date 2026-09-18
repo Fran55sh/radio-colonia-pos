@@ -12,7 +12,7 @@
     "arca:check:dev": "tsx scripts/arca-wsaa-check.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package && node scripts/ensure-arca-common-patch.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",
@@ -29,6 +29,11 @@
     "pdfjs-dist": "^5.4.296",
     "pg": "^8.16.0",
     "zod": "^3.24.2"
+  },
+  "overrides": {
+    "@ramiidv/arca-facturacion": {
+      "@ramiidv/arca-common": "$@ramiidv/arca-common"
+    }
   },
   "devDependencies": {
     "@types/node": "^22.16.5",

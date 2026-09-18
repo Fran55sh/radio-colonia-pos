@@ -18,6 +18,10 @@ export const REQUIRED_TABLES = [
   "pos_facturas_compra",
   "pos_comprobantes_fiscales",
   "pos_compras_importaciones",
+  "pos_caja_sesiones",
+  "pos_caja_saldos_iniciales",
+  "pos_caja_movimientos",
+  "pos_caja_diferencias",
 ] as const;
 
 /** Confirmado al arrancar; /health no reconsulta information_schema bajo carga. */

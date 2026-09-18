@@ -30,6 +30,7 @@ services:
       POS_DEFAULT_ROLE: "${POS_DEFAULT_ROLE:-caja}"
       POS_JWT_SECRET: "${POS_JWT_SECRET:-change-me-jwt-secret-min-16}"
       POS_SESSION_HOURS: "12"
+      POS_CAJA_REQUIRE_SESSION: "${POS_CAJA_REQUIRE_SESSION:-true}"
       ARCA_ENABLED: ${ARCA_ENABLED:-false}
       ARCA_PRODUCTION: ${ARCA_PRODUCTION:-false}
       ARCA_CUIT: ${ARCA_CUIT:-}

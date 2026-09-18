@@ -23,6 +23,11 @@ async function main() {
     console.log("Seed omitido en producción.");
   }
 
+  if (process.env.ARCA_ENABLED === "true") {
+    console.log("Aplicando patch ARCA SOAPAction (arca-common)...");
+    await run("node", ["scripts/ensure-arca-common-patch.mjs"]);
+  }
+
   console.log("Iniciando API...");
   const args = process.argv.slice(2);
   const cmd = args[0] ?? "node";

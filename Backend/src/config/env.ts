@@ -72,6 +72,11 @@ const envSchema = z.object({
   POS_DEFAULT_ROLE: z.enum(["caja", "compras", "admin"]).default("caja"),
   POS_JWT_SECRET: z.string().min(16).optional(),
   POS_SESSION_HOURS: z.coerce.number().int().positive().default(12),
+  /** Si true, ventas POS exigen sesión de caja abierta (o caja_sesion_id válido). */
+  POS_CAJA_REQUIRE_SESSION: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
   COMPRAS_PDF_DIR: z.string().default("./data/compras-pdfs"),
 });
 
@@ -91,6 +96,7 @@ export const env = envSchema.parse({
   POS_DEFAULT_ROLE: process.env.POS_DEFAULT_ROLE,
   POS_JWT_SECRET: process.env.POS_JWT_SECRET || undefined,
   POS_SESSION_HOURS: process.env.POS_SESSION_HOURS,
+  POS_CAJA_REQUIRE_SESSION: process.env.POS_CAJA_REQUIRE_SESSION,
   COMPRAS_PDF_DIR: process.env.COMPRAS_PDF_DIR,
 });
 

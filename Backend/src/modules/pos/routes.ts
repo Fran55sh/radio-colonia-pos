@@ -16,13 +16,15 @@ export async function posRoutes(app: FastifyInstance) {
 
   app.post("/ventas", async (request, reply) => {
     const body = createSaleSchema.parse(request.body);
-    const result = await processSale(body);
+    const result = await processSale(body, {
+      authContext: request.authContext,
+    });
     return reply.status(201).send(result);
   });
 
   app.post("/ventas/offline-batch", async (request, reply) => {
     const body = offlineBatchSchema.parse(request.body);
-    const result = await processOfflineBatch(body.ventas);
+    const result = await processOfflineBatch(body.ventas, request.authContext);
     return reply.send(result);
   });
 }

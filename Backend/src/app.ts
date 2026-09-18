@@ -21,6 +21,7 @@ import { clientesRoutes } from "./modules/clientes/routes.js";
 import { comprasRoutes } from "./modules/compras/routes.js";
 import { contabilidadRoutes } from "./modules/contabilidad/routes.js";
 import { fiscalRoutes } from "./modules/fiscal/routes.js";
+import { cajaRoutes } from "./modules/caja/routes.js";
 import { posRoutes } from "./modules/pos/routes.js";
 import { ensurePdfStorageDir } from "./modules/compras/importacion/pdf-storage.js";
 
@@ -85,6 +86,13 @@ export async function buildApp() {
     async (api) => {
       await api.register(authRoutes, { prefix: "/auth" });
       await api.register(posRoutes, { prefix: "/pos" });
+      await api.register(
+        async (scoped) => {
+          scoped.addHook("preHandler", requireRole("caja"));
+          await scoped.register(cajaRoutes);
+        },
+        { prefix: "/caja" },
+      );
       await api.register(
         async (scoped) => {
           scoped.addHook("preHandler", requireRole("caja"));
