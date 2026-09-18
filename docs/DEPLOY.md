@@ -17,6 +17,12 @@ Tablas requeridas (creadas por el migrador del ecommerce, incl. `0005_pos_operat
 
 **Orden de deploy:** ecommerce (migrador) → POS.
 
+> **Caja MVP (`0017_pos_caja_mvp.sql`):** si desplegás un POS que ya lista
+> `pos_caja_*` en `REQUIRED_TABLES` **antes** de aplicar esa migración, el
+> backend arranca, falla el verify de schema y Coolify lo marca *unhealthy*.
+> Primero redeploy / migrator del ecommerce (o ejecutá el SQL `0017` a mano
+> en la Postgres compartida), después redeploy del POS.
+
 ---
 
 ## Coolify (recomendado)
