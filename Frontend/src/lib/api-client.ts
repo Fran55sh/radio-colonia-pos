@@ -106,9 +106,11 @@ async function apiFetch<T>(
 ): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
     ...(init?.headers as Record<string, string> | undefined),
   };
+  if (init?.body != null && headers["Content-Type"] == null) {
+    headers["Content-Type"] = "application/json";
+  }
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
@@ -212,7 +214,7 @@ export async function retryFiscal(
 ): Promise<{ fiscal: FiscalResult | null }> {
   return apiFetch<{ fiscal: FiscalResult | null }>(
     `/fiscal/ventas/${ventaId}/reintentar`,
-    { method: "POST" },
+    { method: "POST", body: JSON.stringify({}) },
   );
 }
 
