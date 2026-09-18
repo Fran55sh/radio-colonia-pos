@@ -14,7 +14,11 @@ export function getArcaClient(): Arca | null {
       key: config.key,
       production: config.production,
       onEvent: (e) => {
-        if (process.env.NODE_ENV === "development") {
+        if (e.type === "request:error") {
+          console.warn("[ARCA]", e.type, e);
+          return;
+        }
+        if (process.env.NODE_ENV === "development" || process.env.ARCA_DEBUG === "true") {
           console.log("[ARCA]", e.type, e);
         }
       },

@@ -1,0 +1,14 @@
+diff --git a/node_modules/@ramiidv/arca-common/dist/soap-client.js b/node_modules/@ramiidv/arca-common/dist/soap-client.js
+index f8796dd..dd4e65c 100644
+--- a/node_modules/@ramiidv/arca-common/dist/soap-client.js
++++ b/node_modules/@ramiidv/arca-common/dist/soap-client.js
+@@ -92,7 +92,8 @@ export async function soapCall(endpoint, bodyContent, opts) {
+     const headers = {
+         'Content-Type': 'text/xml; charset=utf-8',
+     };
+-    if (opts?.soapAction) {
++    // WSAA/AFIP exige el header aunque sea vacío (SOAPAction: "").
++    if (opts && 'soapAction' in opts) {
+         headers['SOAPAction'] = `"${opts.soapAction}"`;
+     }
+     let lastError;

@@ -9,7 +9,7 @@ services:
       target: production
       args:
         VITE_PROXY_TARGET: http://backend:3001
-    container_name: radio-colonia-frontend
+    container_name: radiocolonia-pos-web-prod
     environment:
       PORT: 3000
       HOST: 0.0.0.0

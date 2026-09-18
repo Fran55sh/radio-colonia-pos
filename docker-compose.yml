@@ -1,34 +1,22 @@
-# Stack unificado: misma base que el ecommerce (radiocolonia_db).
-# En producción, apuntá DATABASE_URL o DB_* a la instancia Postgres del ecommerce.
+# Stack local POS — misma DB que el ecommerce (contenedor radiocolonia-db).
+# Levantá primero: cd "../Radio Colonia/app" && docker compose up -d
+#
+# Contenedores (docker ps):
+#   radiocolonia-pos-api  → Backend API (3001)
+#   radiocolonia-pos-web  → Frontend Vite (5173)
+#   radiocolonia-db       → Postgres compartido (compose ecommerce, :5433)
+
+name: radiocolonia-pos
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: radio-colonia-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: radiocolonia
-      POSTGRES_PASSWORD: radiocolonia_secret
-      POSTGRES_DB: radiocolonia_db
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U radiocolonia -d radiocolonia_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
   backend:
     build:
       context: ./Backend
       dockerfile: Dockerfile
-    container_name: radio-colonia-backend
+    container_name: radiocolonia-pos-api
     restart: unless-stopped
     environment:
-      DB_HOST: postgres
+      DB_HOST: radiocolonia-db
       DB_PORT: 5432
       DB_USER: radiocolonia
       DB_PASSWORD: radiocolonia_secret
@@ -52,18 +40,18 @@ services:
       ARCA_KEY_PATH: ${ARCA_KEY_PATH:-}
     ports:
       - "3001:3001"
-        volumes:
+    volumes:
       - ./certs:/app/certs:ro
-depends_on:
-      postgres:
-        condition: service_healthy
+    networks:
+      - default
+      - ecommerce
 
   frontend:
     build:
       context: ./Frontend
       dockerfile: Dockerfile
       target: development
-    container_name: radio-colonia-frontend
+    container_name: radiocolonia-pos-web
     restart: unless-stopped
     environment:
       VITE_PROXY_TARGET: http://backend:3001
@@ -74,5 +62,7 @@ depends_on:
     volumes:
       - ./Frontend/src:/app/src
 
-volumes:
-  postgres_data:
+networks:
+  ecommerce:
+    external: true
+    name: radiocolonia-ecommerce_default

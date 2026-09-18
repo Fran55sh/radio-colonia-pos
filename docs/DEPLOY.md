@@ -185,9 +185,13 @@ Checklist:
 1. Migrador ecommerce aplicado.
 2. `db:verify` OK.
 3. Variables `ARCA_*` cargadas.
-4. Certificados correctos para el ambiente.
-5. Smoke venta CF → CAE (banner homologación si `ambiente=dev`).
-6. Reintento desde caja ante `error`.
+4. Certificados correctos para el ambiente (PEM inline en Coolify: saltos de línea reales o `\\n`; no mezclar `ARCA_CERT` vacío con paths).
+5. `GET /api/v1/fiscal/config` → `pem_cert_ok` / `pem_key_ok` true, `hints` vacío, `cuit_matches_cert` true.
+6. En el contenedor backend: `npm run arca:check` → WSAA OK.
+7. Smoke venta CF → CAE (banner homologación si `ambiente=dev`).
+8. Reintento desde caja ante `error`.
+
+Si WSAA responde **HTTP 500**: casi siempre cert de homo en prod (o al revés), cert sin servicio **wsfe**, cert vencido, o CUIT distinto al del certificado — ver `hints` en `/fiscal/config`.
 
 ### Roles
 
