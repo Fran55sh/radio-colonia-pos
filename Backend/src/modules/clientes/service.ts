@@ -1,6 +1,6 @@
 import { pool } from "../../config/db.js";
 import { AppError } from "../../middleware/errors.js";
-import { CONDICION_IVA_RI } from "../fiscal/resolver.js";
+import { CONDICION_IVA_RI, isCondicionIvaValida } from "../fiscal/iva-condiciones.js";
 import type { ClienteFiscal } from "../fiscal/types.js";
 
 export type PosCliente = {
@@ -45,6 +45,14 @@ function validateFiscalFields(data: {
         "Condición IVA requerida para clientes con CUIT",
       );
     }
+    if (!isCondicionIvaValida(data.condicion_iva_receptor_id)) {
+      throw new AppError(400, "CONDICION_IVA_INVALIDA", "Condición IVA inválida");
+    }
+  } else if (
+    data.condicion_iva_receptor_id != null &&
+    !isCondicionIvaValida(data.condicion_iva_receptor_id)
+  ) {
+    throw new AppError(400, "CONDICION_IVA_INVALIDA", "Condición IVA inválida");
   }
 }
 

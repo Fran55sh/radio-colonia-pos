@@ -13,10 +13,10 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { Cliente } from "@/lib/api-client";
 import { fetchClientes } from "@/lib/api-client";
+import { CONDICION_IVA_RI, labelCondicionIva } from "@/lib/iva-condiciones";
 import { CustomerFormDialog } from "./CustomerFormDialog";
 import type { CreateClientePayload } from "@/lib/api-client";
 
-const CONDICION_IVA_RI = 1;
 const SEARCH_DEBOUNCE_MS = 250;
 
 function resolveComprobanteLabel(cliente: Cliente | null): string {
@@ -25,7 +25,7 @@ function resolveComprobanteLabel(cliente: Cliente | null): string {
   if (cuit?.length === 11 && cliente.condicion_iva_receptor_id === CONDICION_IVA_RI) {
     return "Factura A";
   }
-  return "Factura B";
+  return `Factura B — ${labelCondicionIva(cliente.condicion_iva_receptor_id)}`;
 }
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {

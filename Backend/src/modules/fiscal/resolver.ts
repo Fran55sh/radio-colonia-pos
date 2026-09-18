@@ -1,10 +1,18 @@
 import { CbteTipo, DocTipo } from "@ramiidv/arca-facturacion";
 import { AppError } from "../../middleware/errors.js";
 import type { ClienteFiscal } from "./types.js";
+import {
+  CONDICION_IVA_CF,
+  CONDICION_IVA_RI,
+  labelCondicionIva,
+} from "./iva-condiciones.js";
 
-/** Condición IVA ARCA: 1 = Responsable Inscripto, 5 = Consumidor Final */
-export const CONDICION_IVA_RI = 1;
-export const CONDICION_IVA_CF = 5;
+export { CONDICION_IVA_CF, CONDICION_IVA_RI } from "./iva-condiciones.js";
+export {
+  CONDICION_IVA_EXENTO,
+  CONDICION_IVA_MONOTRIBUTO,
+  CONDICIONES_IVA_RECEPTOR,
+} from "./iva-condiciones.js";
 
 export type ComprobanteResuelto = {
   cbteTipo: number;
@@ -51,7 +59,7 @@ export function resolverComprobante(cliente: ClienteFiscal | null): ComprobanteR
       docTipo: DocTipo.CUIT,
       docNro: Number(cuit),
       condicionIva: condicion,
-      label: "Factura B",
+      label: `Factura B — ${labelCondicionIva(condicion)}`,
     };
   }
 

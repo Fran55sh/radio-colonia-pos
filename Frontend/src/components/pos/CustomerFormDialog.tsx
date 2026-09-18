@@ -18,8 +18,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { Cliente, CreateClientePayload } from "@/lib/api-client";
+import {
+  CONDICIONES_IVA_RECEPTOR,
+  CONDICION_IVA_CF,
+} from "@/lib/iva-condiciones";
 
-const CONDICION_IVA_RI = 1;
+type DocTipo = "CUIT" | "DNI" | "CF";
 
 type Props = {
   open: boolean;
@@ -31,8 +35,8 @@ type Props = {
 export function CustomerFormDialog({ open, onOpenChange, onSubmit, onCreated }: Props) {
   const [nombre, setNombre] = useState("");
   const [documento, setDocumento] = useState("");
-  const [docTipo, setDocTipo] = useState<"CUIT" | "DNI" | "CF">("CF");
-  const [condicionIva, setCondicionIva] = useState<string>("5");
+  const [docTipo, setDocTipo] = useState<DocTipo>("CF");
+  const [condicionIva, setCondicionIva] = useState<string>(String(CONDICION_IVA_CF));
   const [razonSocial, setRazonSocial] = useState("");
   const [telefono, setTelefono] = useState("");
   const [saving, setSaving] = useState(false);
@@ -42,15 +46,27 @@ export function CustomerFormDialog({ open, onOpenChange, onSubmit, onCreated }: 
     setNombre("");
     setDocumento("");
     setDocTipo("CF");
-    setCondicionIva("5");
+    setCondicionIva(String(CONDICION_IVA_CF));
     setRazonSocial("");
     setTelefono("");
     setError(null);
   };
 
+  function handleDocTipoChange(value: DocTipo) {
+    setDocTipo(value);
+    if (value === "CF") {
+      setCondicionIva(String(CONDICION_IVA_CF));
+      setDocumento("");
+    }
+  }
+
   const handleSave = async () => {
     if (!nombre.trim()) {
       setError("El nombre es obligatorio");
+      return;
+    }
+    if (docTipo === "CUIT" && !documento.replace(/\D/g, "").match(/^\d{11}$/)) {
+      setError("El CUIT debe tener 11 dígitos");
       return;
     }
     setSaving(true);
@@ -60,8 +76,7 @@ export function CustomerFormDialog({ open, onOpenChange, onSubmit, onCreated }: 
         nombre: nombre.trim(),
         documento: documento.trim() || undefined,
         documento_tipo_afip: docTipo,
-        condicion_iva_receptor_id:
-          docTipo === "CUIT" ? Number(condicionIva) : undefined,
+        condicion_iva_receptor_id: Number(condicionIva),
         razon_social: razonSocial.trim() || undefined,
         telefono: telefono.trim() || undefined,
       };
@@ -103,14 +118,29 @@ export function CustomerFormDialog({ open, onOpenChange, onSubmit, onCreated }: 
           </div>
           <div className="grid gap-1.5">
             <Label className="text-silver text-xs">Tipo documento</Label>
-            <Select value={docTipo} onValueChange={(v) => setDocTipo(v as "CUIT" | "DNI" | "CF")}>
+            <Select value={docTipo} onValueChange={(v) => handleDocTipoChange(v as DocTipo)}>
               <SelectTrigger className="bg-midnight border-border">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="CF">Consumidor final</SelectItem>
+                <SelectItem value="CF">Consumidor final (sin documento)</SelectItem>
                 <SelectItem value="CUIT">CUIT</SelectItem>
                 <SelectItem value="DNI">DNI</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-silver text-xs">Condición IVA</Label>
+            <Select value={condicionIva} onValueChange={setCondicionIva}>
+              <SelectTrigger className="bg-midnight border-border">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CONDICIONES_IVA_RECEPTOR.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>
+                    {c.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -124,20 +154,6 @@ export function CustomerFormDialog({ open, onOpenChange, onSubmit, onCreated }: 
                   placeholder="20123456789"
                   className="bg-midnight border-border font-mono"
                 />
-              </div>
-              <div className="grid gap-1.5">
-                <Label className="text-silver text-xs">Condición IVA</Label>
-                <Select value={condicionIva} onValueChange={setCondicionIva}>
-                  <SelectTrigger className="bg-midnight border-border">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={String(CONDICION_IVA_RI)}>
-                      Responsable Inscripto (Factura A)
-                    </SelectItem>
-                    <SelectItem value="5">Consumidor final (Factura B)</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
               <div className="grid gap-1.5">
                 <Label className="text-silver text-xs">Razón social (opcional)</Label>
