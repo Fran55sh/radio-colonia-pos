@@ -14,7 +14,6 @@
     "postinstall": "patch-package"
   },
   "dependencies": {
-    "@ramiidv/arca-common": "^0.2.0",
     "@fastify/cors": "^11.0.1",
     "@fastify/helmet": "^13.1.1",
     "@fastify/multipart": "^10.1.1",
@@ -24,6 +23,7 @@
     "dotenv": "^16.5.0",
     "fastify": "^5.3.3",
     "legacy-pdf-parse": "npm:pdf-parse@^1.1.1",
+    "patch-package": "^8.0.1",
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.4.296",
     "pg": "^8.16.0",
@@ -33,7 +33,6 @@
     "@types/node": "^22.16.5",
     "@types/pdf-parse": "^1.1.5",
     "@types/pg": "^8.15.4",
-    "patch-package": "^8.0.1",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "vitest": "^4.1.11"
