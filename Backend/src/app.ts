@@ -107,7 +107,7 @@ export async function buildApp() {
       );
       await api.register(
         async (scoped) => {
-          scoped.addHook("preHandler", requireRole("admin"));
+          scoped.addHook("preHandler", requireRole("caja"));
           await scoped.register(clientesRoutes);
         },
         { prefix: "/clientes" },

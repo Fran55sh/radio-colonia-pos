@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { User, UserPlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -49,13 +49,24 @@ export function CustomerSelector({ selected, onSelect, onCreate }: Props) {
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, SEARCH_DEBOUNCE_MS);
+  const suppressSelectRef = useRef(false);
 
-  const { data: clientes = [], isLoading } = useQuery({
+  const { data: clientes = [], isLoading, isError, error } = useQuery({
     queryKey: ["pos-clientes", debouncedSearch],
     queryFn: () => fetchClientes(debouncedSearch || undefined),
     staleTime: 30_000,
     enabled: open,
+    retry: false,
   });
+
+  useEffect(() => {
+    if (!open) return;
+    suppressSelectRef.current = true;
+    const t = window.setTimeout(() => {
+      suppressSelectRef.current = false;
+    }, 100);
+    return () => window.clearTimeout(t);
+  }, [open]);
 
   const comprobanteLabel = useMemo(() => resolveComprobanteLabel(selected), [selected]);
 
@@ -63,20 +74,38 @@ export function CustomerSelector({ selected, onSelect, onCreate }: Props) {
     ? selected.razon_social || selected.nombre
     : "Consumidor final";
 
+  function handleOpenChange(next: boolean) {
+    setOpen(next);
+    if (!next) setSearch("");
+  }
+
+  function pickCliente(cliente: Cliente | null) {
+    if (suppressSelectRef.current) return;
+    onSelect(cliente);
+    setOpen(false);
+    setSearch("");
+  }
+
   return (
     <div className="flex items-center gap-2 min-w-0 w-full lg:w-auto">
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={handleOpenChange} modal>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
+            type="button"
             className="h-8 w-full lg:w-auto lg:max-w-[220px] border-border bg-midnight text-silver-light text-xs gap-1.5 truncate justify-start"
             title="Seleccionar cliente (F3)"
+            onPointerDown={(e) => e.preventDefault()}
           >
             <User className="size-3.5 shrink-0 text-primary" />
             <span className="truncate">{displayName}</span>
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[calc(100vw-2rem)] sm:w-80 p-0 bg-midnight border-border" align="end">
+        <PopoverContent
+          className="w-[calc(100vw-2rem)] sm:w-80 p-0 bg-midnight border-border"
+          align="end"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
           <Command shouldFilter={false}>
             <CommandInput
               placeholder="Buscar por nombre o documento…"
@@ -85,24 +114,26 @@ export function CustomerSelector({ selected, onSelect, onCreate }: Props) {
             />
             <CommandList>
               <CommandEmpty>
-                {isLoading ? "Cargando…" : "Sin resultados"}
+                {isLoading
+                  ? "Cargando…"
+                  : isError
+                    ? error instanceof Error
+                      ? error.message
+                      : "Error al cargar clientes"
+                    : "Sin resultados"}
               </CommandEmpty>
               <CommandGroup>
                 <CommandItem
-                  onSelect={() => {
-                    onSelect(null);
-                    setOpen(false);
-                  }}
+                  value="consumidor-final"
+                  onSelect={() => pickCliente(null)}
                 >
                   Consumidor final
                 </CommandItem>
                 {clientes.map((c) => (
                   <CommandItem
                     key={c.id}
-                    onSelect={() => {
-                      onSelect(c);
-                      setOpen(false);
-                    }}
+                    value={`cliente-${c.id}`}
+                    onSelect={() => pickCliente(c)}
                   >
                     <div className="flex flex-col min-w-0">
                       <span className="truncate font-medium">{c.nombre}</span>

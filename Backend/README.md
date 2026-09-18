@@ -78,7 +78,7 @@ El contenedor `backend` ejecuta migración y seed al iniciar (entrypoint Node, s
 | `POS_SESSION_HOURS` | Duración sesión (default 12) |
 | `API_TOKEN` | Opcional: Bearer para scripts (rol admin). Vacío si no se usa |
 
-Roles: `caja` < `compras` < `admin`. Compras exige ≥`compras`; analytics/contabilidad/clientes/fiscal exigen `admin`. Login tiene rate-limit + lockout tras 5 fallos.
+Roles: `caja` < `compras` < `admin`. Compras exige ≥`compras`; analytics/contabilidad/fiscal exigen `admin`. Clientes (listar/alta en caja) exige ≥`caja`. Login tiene rate-limit + lockout tras 5 fallos.
 | `ARCA_ENABLED` | `true` para emitir en homologación |
 | `ARCA_CUIT` | CUIT emisor (11 dígitos) |
 | `ARCA_PTO_VTA` | Punto de venta ARCA |

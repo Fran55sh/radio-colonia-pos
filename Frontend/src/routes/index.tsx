@@ -581,6 +581,7 @@ function POS() {
   const handleLogout = () => {
     clearOfflineQueue();
     setPendingOffline(0);
+    queryClient.removeQueries({ queryKey: ["pos-clientes"] });
     clearToken();
     void navigate({ to: "/login" });
   };
