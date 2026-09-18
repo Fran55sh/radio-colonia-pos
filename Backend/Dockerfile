@@ -22,6 +22,7 @@ COPY package.json package-lock.json* ./
 COPY patches ./patches
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
+COPY scripts/arca-wsaa-check.mjs ./scripts/arca-wsaa-check.mjs
 COPY src/docker-entrypoint.mjs ./docker-entrypoint.mjs
 EXPOSE 3001
 ENTRYPOINT ["node", "docker-entrypoint.mjs"]

@@ -8,7 +8,8 @@
     "start": "node dist/index.js",
     "db:seed": "tsx src/db/seed.ts",
     "db:verify": "tsx scripts/verify-unified-db.ts",
-    "arca:check": "tsx scripts/arca-wsaa-check.ts",
+    "arca:check": "node scripts/arca-wsaa-check.mjs",
+    "arca:check:dev": "tsx scripts/arca-wsaa-check.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "postinstall": "patch-package"
