@@ -11,6 +11,7 @@ import {
   marcarComprobanteEmitido,
   marcarComprobanteError,
   rowToFiscalResponse,
+  withVentaFiscalLock,
 } from "./repository.js";
 import type { ComprobanteFiscalResponse } from "./types.js";
 
@@ -34,26 +35,29 @@ export async function emitirComprobanteVenta(
   const arcaConfig = getArcaConfig();
   if (!arcaConfig?.enabled) return null;
 
-  const ctx = await loadVentaFiscalContext(ventaId);
-  if (!ctx) {
-    throw new AppError(404, "VENTA_NOT_FOUND", "Venta no encontrada");
-  }
+  return withVentaFiscalLock(ventaId, async () => {
+    const ctx = await loadVentaFiscalContext(ventaId);
+    if (!ctx) {
+      throw new AppError(404, "VENTA_NOT_FOUND", "Venta no encontrada");
+    }
 
-  const existing = await getComprobanteByVentaId(ventaId);
-  if (existing?.estado === "emitido" && existing.cae) {
-    return rowToFiscalResponse(existing);
-  }
-  if (existing?.estado === "pendiente" && !options?.forceRetry) {
-    return await ejecutarEmision(ventaId, ctx, arcaConfig);
-  }
-  if (existing?.estado === "error" && options?.forceRetry) {
-    return await ejecutarEmision(ventaId, ctx, arcaConfig);
-  }
-  if (existing?.estado === "error" && !options?.forceRetry) {
-    return rowToFiscalResponse(existing);
-  }
+    // Re-check under lock so concurrent retries cannot double-call WSFE.
+    const existing = await getComprobanteByVentaId(ventaId);
+    if (existing?.estado === "emitido" && existing.cae) {
+      return rowToFiscalResponse(existing);
+    }
+    if (existing?.estado === "pendiente" && !options?.forceRetry) {
+      return await ejecutarEmision(ventaId, ctx, arcaConfig);
+    }
+    if (existing?.estado === "error" && options?.forceRetry) {
+      return await ejecutarEmision(ventaId, ctx, arcaConfig);
+    }
+    if (existing?.estado === "error" && !options?.forceRetry) {
+      return rowToFiscalResponse(existing);
+    }
 
-  return await ejecutarEmision(ventaId, ctx, arcaConfig);
+    return await ejecutarEmision(ventaId, ctx, arcaConfig);
+  });
 }
 
 async function ejecutarEmision(

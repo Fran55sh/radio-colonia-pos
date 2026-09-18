@@ -107,17 +107,13 @@ export async function ensureComprobantePendiente(
     total: number;
   },
 ): Promise<ComprobanteRow> {
-  const existing = await getComprobanteByVentaId(ventaId);
-  if (existing) return existing;
-
-  const { rows } = await pool.query<ComprobanteRow>(
+  await pool.query(
     `INSERT INTO pos_comprobantes_fiscales (
       venta_id, estado, ambiente, emisor_cuit, punto_venta, cbte_tipo,
       doc_tipo, doc_nro, condicion_iva_receptor_id,
       neto_gravado, iva_total, exento, total
     ) VALUES ($1, 'pendiente', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-    RETURNING id, venta_id, estado, ambiente, emisor_cuit, punto_venta, cbte_tipo,
-              cbte_nro, fecha_cbte::text, cae, cae_vencimiento::text, qr_url, error_message`,
+    ON CONFLICT (venta_id) DO NOTHING`,
     [
       ventaId,
       data.ambiente,
@@ -133,7 +129,31 @@ export async function ensureComprobantePendiente(
       data.total,
     ],
   );
-  return rows[0];
+
+  const row = await getComprobanteByVentaId(ventaId);
+  if (!row) {
+    throw new Error(`No se pudo crear/leer comprobante fiscal para venta ${ventaId}`);
+  }
+  return row;
+}
+
+/** Serialize emission/retry per venta via session-level advisory lock (WSFE stays outside DB TX). */
+export async function withVentaFiscalLock<T>(
+  ventaId: number,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  const lockClass = 8421001;
+  try {
+    await client.query("SELECT pg_advisory_lock($1, $2)", [lockClass, ventaId]);
+    return await fn();
+  } finally {
+    try {
+      await client.query("SELECT pg_advisory_unlock($1, $2)", [lockClass, ventaId]);
+    } finally {
+      client.release();
+    }
+  }
 }
 
 export async function marcarComprobanteEmitido(

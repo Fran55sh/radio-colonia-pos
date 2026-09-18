@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { isArcaConfigured } from "../../config/arca.js";
+import { getArcaConfig, isArcaConfigured } from "../../config/arca.js";
 import { AppError } from "../../middleware/errors.js";
 import { getFiscalStatus, reintentarComprobante } from "./service.js";
 
@@ -26,9 +26,11 @@ export async function fiscalRoutes(app: FastifyInstance) {
   });
 
   app.get("/config", async (_request, reply) => {
+    const config = getArcaConfig();
     return reply.send({
-      arca_enabled: isArcaConfigured(),
-      ambiente: isArcaConfigured() ? "homologacion" : null,
+      arca_enabled: config !== null,
+      production: config ? config.production : null,
+      ambiente: config ? config.ambiente : null,
     });
   });
 }

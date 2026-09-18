@@ -46,6 +46,14 @@ services:
       POS_DEFAULT_ROLE: ${POS_DEFAULT_ROLE:-caja}
       POS_JWT_SECRET: ${POS_JWT_SECRET}
       POS_SESSION_HOURS: ${POS_SESSION_HOURS:-12}
+      ARCA_ENABLED: ${ARCA_ENABLED:-false}
+      ARCA_PRODUCTION: ${ARCA_PRODUCTION:-false}
+      ARCA_CUIT: ${ARCA_CUIT:-}
+      ARCA_PTO_VTA: ${ARCA_PTO_VTA:-1}
+      ARCA_CERT: ${ARCA_CERT:-}
+      ARCA_KEY: ${ARCA_KEY:-}
+      ARCA_CERT_PATH: ${ARCA_CERT_PATH:-}
+      ARCA_KEY_PATH: ${ARCA_KEY_PATH:-}
 
   frontend:
     build:

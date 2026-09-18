@@ -90,7 +90,7 @@ async function registerSaleInTransaction(
       );
     }
 
-    const alicuota = DEFAULT_IVA_ALICUOTA;
+    const alicuota = variant.alicuota_iva ?? DEFAULT_IVA_ALICUOTA;
     const totalLinea = precio * linea.cantidad;
     const breakdown = splitPriceWithIva(totalLinea, alicuota);
 
@@ -176,7 +176,10 @@ export async function listProductosCaja(client: DbClient): Promise<ProductoCaja[
   return listCatalogForPos(client);
 }
 
-export async function processSale(input: CreateSaleInput): Promise<SaleResult> {
+export async function processSale(
+  input: CreateSaleInput,
+  opts?: { skipFiscal?: boolean },
+): Promise<SaleResult> {
   await validateClienteId(input.cliente_id);
 
   if (input.client_sale_id) {
@@ -197,8 +200,9 @@ export async function processSale(input: CreateSaleInput): Promise<SaleResult> {
     registerSaleInTransaction(client, input),
   );
 
-  const skipFiscal = input.sincronizada_offline === true;
-  const fiscal = await maybeEmitirDespuesDeVenta(ventaId, { skipFiscal });
+  const fiscal = await maybeEmitirDespuesDeVenta(ventaId, {
+    skipFiscal: opts?.skipFiscal === true,
+  });
 
   return {
     venta_id: ventaId,
@@ -233,10 +237,13 @@ export async function processOfflineBatch(
 
   for (const venta of ventas) {
     try {
-      const result = await processSale({
-        ...venta,
-        sincronizada_offline: true,
-      });
+      const result = await processSale(
+        {
+          ...venta,
+          sincronizada_offline: true,
+        },
+        { skipFiscal: true },
+      );
       procesadas++;
       if (venta.client_sale_id) {
         const fiscal = await maybeEmitirDespuesDeVenta(result.venta_id);

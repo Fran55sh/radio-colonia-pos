@@ -154,3 +154,41 @@ Verificación manual:
 cd Backend
 npm run db:verify
 ```
+
+
+## Facturación ARCA / AFIP (WSFE)
+
+El módulo fiscal del POS **ya está implementado**. Homologación y go-live son configuración + certificados.
+
+### Switches
+
+| Variable | Rol |
+|----------|-----|
+| `ARCA_ENABLED` | Kill switch. `false` = nunca emite. |
+| `ARCA_PRODUCTION` | `false` = homologación (`ambiente: "dev"`). `true` = producción (`ambiente: "prod"`). |
+| `ARCA_CUIT` / `ARCA_PTO_VTA` | CUIT emisor y punto de venta. |
+| `ARCA_CERT` / `ARCA_KEY` | PEM inline (recomendado en Coolify). |
+| `ARCA_CERT_PATH` / `ARCA_KEY_PATH` | Rutas a PEM (local / volume `./certs`). |
+
+Homologación: `ARCA_ENABLED=true` + `ARCA_PRODUCTION=false` + certs homo.
+
+Producción: `ARCA_ENABLED=true` + `ARCA_PRODUCTION=true` + certs prod.
+
+Emergencia: solo `ARCA_ENABLED=false`.
+
+### Schema DB
+
+`pos_comprobantes_fiscales` y columnas fiscales de clientes vienen de la migración del ecommerce (`0008_*fiscal*`). El POS no crea tablas; al arrancar verifica schema.
+
+Checklist:
+
+1. Migrador ecommerce aplicado.
+2. `db:verify` OK.
+3. Variables `ARCA_*` cargadas.
+4. Certificados correctos para el ambiente.
+5. Smoke venta CF → CAE (banner homologación si `ambiente=dev`).
+6. Reintento desde caja ante `error`.
+
+### Roles
+
+`/api/v1/fiscal/*` requiere rol **caja** o superior.

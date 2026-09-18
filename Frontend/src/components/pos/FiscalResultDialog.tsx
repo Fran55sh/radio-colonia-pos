@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -7,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { FiscalResult } from "@/lib/api-client";
+import { retryFiscal, type FiscalResult } from "@/lib/api-client";
 
 type Props = {
   open: boolean;
@@ -16,6 +17,7 @@ type Props = {
   ventaId: number;
   total: number;
   formatMoney: (n: number) => string;
+  onFiscalUpdated?: (fiscal: FiscalResult) => void;
 };
 
 export function FiscalResultDialog({
@@ -25,10 +27,30 @@ export function FiscalResultDialog({
   ventaId,
   total,
   formatMoney,
+  onFiscalUpdated,
 }: Props) {
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
   if (!fiscal) return null;
 
   const ok = fiscal.estado === "emitido" && !!fiscal.cae;
+  const canRetry = fiscal.estado === "error" || fiscal.estado === "pendiente";
+
+  async function handleRetry() {
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      const res = await retryFiscal(ventaId);
+      if (res.fiscal) {
+        onFiscalUpdated?.(res.fiscal);
+      }
+    } catch (err) {
+      setRetryError(err instanceof Error ? err.message : "No se pudo reintentar");
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -55,11 +77,14 @@ export function FiscalResultDialog({
             <Row label="Vence" value={fiscal.cae_vencimiento} />
           )}
           {fiscal.estado === "pendiente" && (
-            <p className="text-silver text-xs">Emisión fiscal pendiente (offline o ARCA no disponible).</p>
+            <p className="text-silver text-xs">
+              Emisión fiscal pendiente (offline o ARCA no disponible).
+            </p>
           )}
           {fiscal.estado === "error" && fiscal.error_message && (
             <p className="text-destructive text-xs">{fiscal.error_message}</p>
           )}
+          {retryError && <p className="text-destructive text-xs">{retryError}</p>}
           {fiscal.qr_url && (
             <a
               href={fiscal.qr_url}
@@ -72,7 +97,16 @@ export function FiscalResultDialog({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="gap-2 sm:gap-2">
+          {canRetry && (
+            <Button
+              variant="outline"
+              disabled={retrying}
+              onClick={() => void handleRetry()}
+            >
+              {retrying ? "Reintentando…" : "Reintentar"}
+            </Button>
+          )}
           <Button onClick={() => onOpenChange(false)}>Cerrar</Button>
         </DialogFooter>
       </DialogContent>

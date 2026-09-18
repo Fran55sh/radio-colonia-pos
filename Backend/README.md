@@ -78,9 +78,10 @@ El contenedor `backend` ejecuta migración y seed al iniciar (entrypoint Node, s
 | `POS_SESSION_HOURS` | Duración sesión (default 12) |
 | `API_TOKEN` | Opcional: Bearer para scripts (rol admin). Vacío si no se usa |
 
-Roles: `caja` < `compras` < `admin`. Compras exige ≥`compras`; analytics/contabilidad/fiscal exigen `admin`. Clientes (listar/alta en caja) exige ≥`caja`. Login tiene rate-limit + lockout tras 5 fallos.
+Roles: `caja` < `compras` < `admin`. Compras exige ≥`compras`; analytics/contabilidad exigen `admin`; fiscal exige ≥`caja`. Clientes (listar/alta en caja) exige ≥`caja`. Login tiene rate-limit + lockout tras 5 fallos.
 | `ARCA_ENABLED` | `true` para emitir en homologación |
 | `ARCA_CUIT` | CUIT emisor (11 dígitos) |
 | `ARCA_PTO_VTA` | Punto de venta ARCA |
 | `ARCA_PRODUCTION` | `false` en desarrollo |
-| `ARCA_CERT_PATH` / `ARCA_KEY_PATH` | Certificado y clave PEM (homologación) |
+| `ARCA_CERT_PATH` / `ARCA_KEY_PATH` | Certificado y clave PEM por path |
+| `ARCA_CERT` / `ARCA_KEY` | PEM inline (recomendado en Coolify) |

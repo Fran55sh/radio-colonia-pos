@@ -207,6 +207,16 @@ export async function createVenta(payload: CreateSalePayload): Promise<CreateSal
   });
 }
 
+export async function retryFiscal(
+  ventaId: number,
+): Promise<{ fiscal: FiscalResult | null }> {
+  return apiFetch<{ fiscal: FiscalResult | null }>(
+    `/fiscal/ventas/${ventaId}/reintentar`,
+    { method: "POST" },
+  );
+}
+
+
 export async function syncOfflineVentas(
   ventas: CreateSalePayload[],
 ): Promise<OfflineBatchResult> {

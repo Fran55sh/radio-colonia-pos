@@ -16,6 +16,7 @@ export type CatalogRow = {
   supplier_id: string | null;
   supplier_code: string | null;
   price_tiers: PriceTier[] | null;
+  alicuota_iva: number;
 };
 
 /** Nombre visible en caja: producto + valores de atributos (ej. "Cable 1mt"). */
@@ -77,6 +78,11 @@ function tiersFromRow(
   return resolveEffectiveTiers(scope, parseTiers(productRaw), parseTiers(variantRaw));
 }
 
+function normalizeIvaAlicuota(value: unknown): number {
+  const n = Number(value);
+  return n === 10.5 ? 10.5 : DEFAULT_IVA_ALICUOTA;
+}
+
 /** Listado caja: sin offers (no se usan en la UI). SKUs se asumen normalizados a minúsculas en DB. */
 const LIST_CATALOG_SELECT = `
   SELECT
@@ -87,6 +93,7 @@ const LIST_CATALOG_SELECT = `
     pv.attributes AS attributes,
     COALESCE(pv.sale_price, p.price)::float AS precio_venta,
     pv.stock,
+    COALESCE(pv.iva_alicuota, 21)::float AS alicuota_iva,
     COALESCE(p.qty_discount_scope, 'per_variant') AS qty_discount_scope,
     (
       SELECT ${TIER_JSON_AGG}
@@ -111,6 +118,7 @@ export async function listCatalogForPos(client: DbClient): Promise<ProductoCaja[
     attributes: Record<string, string>;
     precio_venta: number;
     stock: number;
+    alicuota_iva: number;
     qty_discount_scope: string;
     product_price_tiers: unknown;
     variant_price_tiers: unknown;
@@ -124,7 +132,7 @@ export async function listCatalogForPos(client: DbClient): Promise<ProductoCaja[
     nombre: formatPosProductName(r.product_name, r.attributes),
     precio_venta: r.precio_venta,
     stock: r.stock,
-    alicuota_iva: DEFAULT_IVA_ALICUOTA,
+    alicuota_iva: normalizeIvaAlicuota(r.alicuota_iva),
     price_tiers: tiersFromRow(r.qty_discount_scope, r.product_price_tiers, r.variant_price_tiers),
   }));
 }
@@ -137,6 +145,7 @@ type SaleDecrementRow = {
   attributes: Record<string, string>;
   precio_venta: number;
   stock: number;
+  alicuota_iva: number;
   qty_discount_scope: string;
   product_price_tiers: unknown;
   variant_price_tiers: unknown;
@@ -173,6 +182,7 @@ export async function lockAndDecrementForSale(
        pv.attributes AS attributes,
        COALESCE(pv.sale_price, p.price)::float AS precio_venta,
        pv.stock,
+       COALESCE(pv.iva_alicuota, 21)::float AS alicuota_iva,
        (
          SELECT json_build_object(
            'cost_price', pso.cost_price::float,
@@ -229,6 +239,7 @@ export async function lockAndDecrementForSale(
     cost_price: offer?.cost_price ?? null,
     supplier_id: offer?.supplier_id ?? null,
     supplier_code: offer?.supplier_code ?? null,
+    alicuota_iva: normalizeIvaAlicuota(row.alicuota_iva),
     price_tiers: tiersFromRow(
       row.qty_discount_scope,
       row.product_price_tiers,

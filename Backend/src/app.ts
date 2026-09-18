@@ -11,6 +11,7 @@ import {
   validateConnectedDatabase,
 } from "./db/verify-schema.js";
 import { env } from "./config/env.js";
+import { warnIfArcaEnabledButIncomplete } from "./config/arca.js";
 import { errorHandler } from "./middleware/errors.js";
 import { requireAuth, requireRole } from "./middleware/auth.js";
 import { analyticsRoutes } from "./modules/analytics/routes.js";
@@ -86,7 +87,7 @@ export async function buildApp() {
       await api.register(posRoutes, { prefix: "/pos" });
       await api.register(
         async (scoped) => {
-          scoped.addHook("preHandler", requireRole("admin"));
+          scoped.addHook("preHandler", requireRole("caja"));
           await scoped.register(fiscalRoutes);
         },
         { prefix: "/fiscal" },
@@ -138,6 +139,7 @@ export async function startServer() {
   } else {
     console.log("[POS] Auth por PIN habilitada");
   }
+  warnIfArcaEnabledButIncomplete();
   const app = await buildApp();
   await app.listen({ port: env.PORT, host: env.HOST });
   return app;

@@ -1109,6 +1109,7 @@ function POS() {
         ventaId={lastVentaId}
         total={lastSaleTotal}
         formatMoney={formatARS}
+        onFiscalUpdated={setLastFiscal}
       />
 
       <Dialog open={pendingProduct !== null} onOpenChange={(open) => { if (!open) closeQtyDialog(); }}>
