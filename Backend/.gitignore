@@ -3,3 +3,11 @@ dist/
 .env
 *.log
 data/compras-pdfs/
+# ARCA/AFIP — certificados locales (montar volume en Docker, ver .env.example)
+certs/
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
