@@ -5,6 +5,7 @@ import {
   formatPosProductName,
   listCatalogForPos,
   lockAndDecrementForSale,
+  syncProductsStockBatch,
   type ProductoCaja,
 } from "../../lib/catalog.js";
 import { DEFAULT_IVA_ALICUOTA } from "../../lib/constants.js";
@@ -148,6 +149,11 @@ async function registerSaleInTransaction(
     totalVenta += breakdown.total;
   }
 
+  await syncProductsStockBatch(
+    client,
+    lineasDetalle.map((l) => l.product_id),
+  );
+
   const ventaInsert = await client.query<{ id: number }>(
     `INSERT INTO pos_ventas (
       client_sale_id, cliente_id, canal, medio_pago, estado,
@@ -276,45 +282,66 @@ export async function processSale(
 
   const label = actorLabel(opts?.authContext);
 
-  const { ventaId, totalVenta, cajaMovimientoId } = await withTransaction(
-    async (client) => {
-      const sale = await registerSaleInTransaction(
-        client,
-        input,
-        resolved?.sesion_id ?? null,
-        label,
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const { ventaId, totalVenta, cajaMovimientoId } = await withTransaction(
+        async (client) => {
+          const sale = await registerSaleInTransaction(
+            client,
+            input,
+            resolved?.sesion_id ?? null,
+            label,
+          );
+          let movId: number | undefined;
+          if (resolved) {
+            const ensured = await ensureSaleMovimiento(client, {
+              sesion_id: resolved.sesion_id,
+              amount: sale.totalVenta,
+              payment_method: input.medio_pago,
+              source_id: String(sale.ventaId),
+              created_by_label: label,
+              post_cierre_offline: resolved.post_cierre_offline,
+            });
+            movId = ensured.row.id;
+          }
+          return {
+            ventaId: sale.ventaId,
+            totalVenta: sale.totalVenta,
+            cajaMovimientoId: movId,
+          };
+        },
       );
-      let movId: number | undefined;
-      if (resolved) {
-        const ensured = await ensureSaleMovimiento(client, {
-          sesion_id: resolved.sesion_id,
-          amount: sale.totalVenta,
-          payment_method: input.medio_pago,
-          source_id: String(sale.ventaId),
-          created_by_label: label,
-          post_cierre_offline: resolved.post_cierre_offline,
-        });
-        movId = ensured.row.id;
-      }
+
+      const fiscal = await maybeEmitirDespuesDeVenta(ventaId, {
+        skipFiscal: opts?.skipFiscal === true,
+      });
+
       return {
-        ventaId: sale.ventaId,
-        totalVenta: sale.totalVenta,
-        cajaMovimientoId: movId,
+        venta_id: ventaId,
+        total: totalVenta,
+        client_sale_id: input.client_sale_id,
+        fiscal,
+        caja_movimiento_id: cajaMovimientoId,
       };
-    },
-  );
+    } catch (err: unknown) {
+      lastError = err;
+      const isDeadlock =
+        err != null &&
+        typeof err === "object" &&
+        "code" in err &&
+        (err.code === "40P01" || err.code === "40001");
 
-  const fiscal = await maybeEmitirDespuesDeVenta(ventaId, {
-    skipFiscal: opts?.skipFiscal === true,
-  });
+      if (isDeadlock && attempt < 3) {
+        const backoffMs = 50 + Math.random() * 100;
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        continue;
+      }
+      throw err;
+    }
+  }
 
-  return {
-    venta_id: ventaId,
-    total: totalVenta,
-    client_sale_id: input.client_sale_id,
-    fiscal,
-    caja_movimiento_id: cajaMovimientoId,
-  };
+  throw lastError;
 }
 
 export async function processOfflineBatch(

@@ -1,6 +1,9 @@
 import type { DbClient } from "../../../config/db.js";
 import { withTransaction } from "../../../config/db.js";
-import { lockAndIncrementForPurchase } from "../../../lib/catalog.js";
+import {
+  lockAndIncrementForPurchase,
+  syncProductsStockBatch,
+} from "../../../lib/catalog.js";
 import { insertStockLedger } from "../../../lib/stock-ledger.js";
 import { AppError } from "../../../middleware/errors.js";
 import { applyComputedAmountsToInvoice, computeInvoiceAmounts } from "./invoice-math.js";
@@ -189,6 +192,8 @@ export async function executeImportacion(
       throw new AppError(409, "FACTURA_DUPLICADA", "Esta factura ya fue procesada.");
     }
 
+    const productIdsToSync: string[] = [];
+
     for (const item of invoice.items) {
       await assertSupplierCodeMapping(
         client,
@@ -268,6 +273,8 @@ export async function executeImportacion(
         costoNeto,
       );
 
+      productIdsToSync.push(stockChange.product_id);
+
       await insertStockLedger(client, {
         tipo: "compra_factura",
         canal: "pos",
@@ -308,6 +315,8 @@ export async function executeImportacion(
         costoNeto,
       );
     }
+
+    await syncProductsStockBatch(client, productIdsToSync);
 
     const pdfKey =
       row.pdf_storage_key &&
