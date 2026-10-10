@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { AppError } from "../../../middleware/errors.js";
+import { actorLabel } from "../../caja/service.js";
 import { createImportacionTextSchema, patchImportacionSchema } from "./schemas.js";
 import {
   cancelImportacion,
@@ -60,7 +61,10 @@ export async function importacionRoutes(app: FastifyInstance) {
 
   app.post("/:id/ejecutar", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const result = await executeImportacion(Number(id), "pos");
+    const result = await executeImportacion(
+      Number(id),
+      actorLabel(request.authContext),
+    );
     return reply.send(result);
   });
 

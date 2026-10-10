@@ -10,6 +10,7 @@ import {
 import { DEFAULT_IVA_ALICUOTA } from "../../lib/constants.js";
 import { splitPriceWithIva } from "../../lib/iva.js";
 import { resolveUnitPrice } from "../../lib/quantity-pricing.js";
+import { insertStockLedger } from "../../lib/stock-ledger.js";
 import type { AuthContext } from "../../middleware/auth.js";
 import { AppError } from "../../middleware/errors.js";
 import {
@@ -34,6 +35,7 @@ export type SaleResult = {
 
 type LineaDetalle = {
   variant_id: string;
+  product_id: string;
   sku_snapshot: string;
   name_snapshot: string;
   cantidad: number;
@@ -46,6 +48,8 @@ type LineaDetalle = {
   iva_linea: number;
   exento_linea: number;
   total_linea: number;
+  stock_before: number;
+  stock_after: number;
 };
 
 async function findVentaByClientSaleId(
@@ -83,6 +87,7 @@ async function registerSaleInTransaction(
   client: DbClient,
   input: CreateSaleInput,
   cajaSesionId?: number | null,
+  saleActor?: string,
 ): Promise<{ ventaId: number; totalVenta: number }> {
   let netoTotal = 0;
   let ivaTotal = 0;
@@ -120,6 +125,7 @@ async function registerSaleInTransaction(
 
     lineasDetalle.push({
       variant_id: variant.variant_id,
+      product_id: variant.product_id,
       sku_snapshot: variant.sku,
       name_snapshot: formatPosProductName(variant.product_name, variant.attributes),
       cantidad: linea.cantidad,
@@ -132,6 +138,8 @@ async function registerSaleInTransaction(
       iva_linea: breakdown.iva,
       exento_linea: breakdown.exento,
       total_linea: breakdown.total,
+      stock_before: variant.stock_before,
+      stock_after: variant.stock_after,
     });
 
     netoTotal += breakdown.netoGravado;
@@ -161,12 +169,13 @@ async function registerSaleInTransaction(
   const ventaId = ventaInsert.rows[0].id;
 
   for (const ld of lineasDetalle) {
-    await client.query(
+    const lineInsert = await client.query<{ id: number }>(
       `INSERT INTO pos_lineas_venta (
         venta_id, variant_id, sku_snapshot, name_snapshot, cantidad, precio_unitario,
         cost_price_snapshot, supplier_id_snapshot, supplier_code_snapshot, alicuota_iva,
         neto_linea, iva_linea, exento_linea, total_linea
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      RETURNING id`,
       [
         ventaId,
         ld.variant_id,
@@ -184,6 +193,24 @@ async function registerSaleInTransaction(
         ld.total_linea,
       ],
     );
+
+    await insertStockLedger(client, {
+      tipo: "venta_pos",
+      canal: "pos",
+      actor: saleActor ?? "unknown",
+      ref_tipo: "pos_linea_venta",
+      ref_id: String(lineInsert.rows[0].id),
+      variant_id: ld.variant_id,
+      product_id: ld.product_id,
+      sku: ld.sku_snapshot,
+      delta: -ld.cantidad,
+      stock_before: ld.stock_before,
+      stock_after: ld.stock_after,
+      reason: "baja",
+      source: "pos",
+      note: null,
+      product_name_snapshot: ld.name_snapshot,
+    });
   }
 
   await client.query(
@@ -255,6 +282,7 @@ export async function processSale(
         client,
         input,
         resolved?.sesion_id ?? null,
+        label,
       );
       let movId: number | undefined;
       if (resolved) {

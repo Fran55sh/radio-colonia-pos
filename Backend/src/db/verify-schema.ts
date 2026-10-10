@@ -46,6 +46,17 @@ export async function tableExists(table: string): Promise<boolean> {
   return rows[0]?.exists === true;
 }
 
+export async function columnExists(table: string, column: string): Promise<boolean> {
+  const { rows } = await pool.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
+     ) AS exists`,
+    [table, column],
+  );
+  return rows[0]?.exists === true;
+}
+
 export async function assertRequiredSchema(): Promise<void> {
   const missing: string[] = [];
   for (const table of REQUIRED_TABLES) {
@@ -59,6 +70,25 @@ export async function assertRequiredSchema(): Promise<void> {
         "Ejecutá el migrador del ecommerce (Radio Colonia/app migrate.sh) antes de desplegar el POS.",
     );
   }
+
+  if (env.POS_STOCK_LEDGER_ENABLED) {
+    if (!(await tableExists("inventory_movements"))) {
+      missing.push("inventory_movements");
+    } else {
+      for (const col of ["tipo", "canal"] as const) {
+        if (!(await columnExists("inventory_movements", col))) {
+          missing.push(`inventory_movements.${col}`);
+        }
+      }
+    }
+    if (missing.length > 0) {
+      throw new Error(
+        `POS_STOCK_LEDGER_ENABLED=true pero faltan columnas/tablas: ${missing.join(", ")}. ` +
+          "Aplicá la migración ecommerce 0022 (inventory_movements_ext) antes de activar el flag.",
+      );
+    }
+  }
+
   markSchemaReady();
 }
 

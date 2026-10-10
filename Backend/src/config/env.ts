@@ -77,6 +77,14 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+  /**
+   * Si true, ventas/facturas escriben inventory_movements (requiere migración ecommerce 0022).
+   * Default off: deploy POS sin cambiar comportamiento hasta activar el flag.
+   */
+  POS_STOCK_LEDGER_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
   COMPRAS_PDF_DIR: z.string().default("./data/compras-pdfs"),
 });
 
@@ -97,6 +105,7 @@ export const env = envSchema.parse({
   POS_JWT_SECRET: process.env.POS_JWT_SECRET || undefined,
   POS_SESSION_HOURS: process.env.POS_SESSION_HOURS,
   POS_CAJA_REQUIRE_SESSION: process.env.POS_CAJA_REQUIRE_SESSION,
+  POS_STOCK_LEDGER_ENABLED: process.env.POS_STOCK_LEDGER_ENABLED,
   COMPRAS_PDF_DIR: process.env.COMPRAS_PDF_DIR,
 });
 
