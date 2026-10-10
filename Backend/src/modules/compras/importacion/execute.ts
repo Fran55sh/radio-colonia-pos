@@ -1,6 +1,7 @@
 import type { DbClient } from "../../../config/db.js";
 import { withTransaction } from "../../../config/db.js";
 import { lockAndIncrementForPurchase } from "../../../lib/catalog.js";
+import { insertStockLedger } from "../../../lib/stock-ledger.js";
 import { AppError } from "../../../middleware/errors.js";
 import { applyComputedAmountsToInvoice, computeInvoiceAmounts } from "./invoice-math.js";
 import {
@@ -21,6 +22,30 @@ function numeroComprobanteLabel(inv: NormalizedInvoice): string {
   return `${tipo}-${pv}-${nro}`;
 }
 
+/** D4: Factura A = neto/qty; B/C = (neto+iva)/qty (IVA no recuperable). */
+export function costoUnitarioDesdeLinea(
+  tipoComprobante: string,
+  netoLinea: number,
+  ivaLinea: number,
+  cantidad: number,
+): number {
+  if (cantidad <= 0) return 0;
+  const tipo = tipoComprobante.toUpperCase();
+  if (tipo === "A") {
+    return netoLinea / cantidad;
+  }
+  return (netoLinea + ivaLinea) / cantidad;
+}
+
+function costsDiffer(
+  a: number | null | undefined,
+  b: number | null | undefined,
+): boolean {
+  if (a == null && b == null) return false;
+  if (a == null || b == null) return true;
+  return Math.abs(a - b) > 0.00005;
+}
+
 async function upsertSupplierOffer(
   client: DbClient,
   proveedorId: string,
@@ -29,7 +54,7 @@ async function upsertSupplierOffer(
   costo: number,
 ) {
   const code = codigoProveedor || "SIN-CODIGO";
-  const cost = costo.toFixed(2);
+  const cost = costo.toFixed(4);
 
   // Si el código estaba en otra variante, reasignarlo (tras confirmación previa)
   await client.query(
@@ -51,6 +76,39 @@ async function upsertSupplierOffer(
        last_cost_update = NOW(),
        updated_at = NOW()`,
     [variantId, proveedorId, code, cost],
+  );
+}
+
+async function insertCostoHistorial(
+  client: DbClient,
+  row: {
+    variant_id: string;
+    sku_snapshot: string;
+    costo_anterior: number | null;
+    costo_nuevo: number;
+    origen: string;
+    ref_tipo: string | null;
+    ref_id: string | null;
+    proveedor_id: string | null;
+    actor: string | null;
+  },
+): Promise<void> {
+  await client.query(
+    `INSERT INTO costo_historial (
+       variant_id, sku_snapshot, costo_anterior, costo_nuevo,
+       origen, ref_tipo, ref_id, proveedor_id, actor
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [
+      row.variant_id,
+      row.sku_snapshot,
+      row.costo_anterior,
+      row.costo_nuevo,
+      row.origen,
+      row.ref_tipo,
+      row.ref_id,
+      row.proveedor_id,
+      row.actor,
+    ],
   );
 }
 
@@ -168,20 +226,29 @@ export async function executeImportacion(
       const sku = (item.sku ?? "").toLowerCase() || codigoProv.toLowerCase();
       const descripcion =
         item.producto_nombre?.trim() || item.descripcion?.trim() || sku;
+      const cantidad = Math.round(item.cantidad);
+      const costoNeto = costoUnitarioDesdeLinea(
+        tipo,
+        calc.neto_linea,
+        calc.iva_linea,
+        cantidad,
+      );
 
-      await client.query(
+      const lineaOc = await client.query<{ id: number }>(
         `INSERT INTO pos_ordenes_compra_lineas (
            orden_id, variant_id, sku_snapshot, codigo_proveedor, cantidad, costo_unitario,
-           descuento, descuento_porcentaje, importe, descripcion_factura,
+           costo_unitario_neto, descuento, descuento_porcentaje, importe, descripcion_factura,
            alicuota_iva, neto_linea, iva_linea, total_linea
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+         RETURNING id`,
         [
           ordenId,
           variantId,
           sku,
           codigoProv,
-          Math.round(item.cantidad),
+          cantidad,
           item.precio_unitario,
+          costoNeto,
           calc.descuento_monto,
           calc.descuento_porcentaje,
           calc.importe,
@@ -192,20 +259,53 @@ export async function executeImportacion(
           calc.total_linea,
         ],
       );
+      const lineaOcId = lineaOc.rows[0].id;
 
-      await lockAndIncrementForPurchase(
+      const stockChange = await lockAndIncrementForPurchase(
         client,
         variantId,
-        Math.round(item.cantidad),
-        item.precio_unitario,
+        cantidad,
+        costoNeto,
       );
+
+      await insertStockLedger(client, {
+        tipo: "compra_factura",
+        canal: "pos",
+        actor: executedBy,
+        ref_tipo: "pos_orden_compra_linea",
+        ref_id: String(lineaOcId),
+        variant_id: stockChange.variant_id,
+        product_id: stockChange.product_id,
+        sku: stockChange.sku,
+        delta: cantidad,
+        stock_before: stockChange.stock_before,
+        stock_after: stockChange.stock_after,
+        reason: "alta",
+        source: "pos",
+        note: label,
+        product_name_snapshot: descripcion,
+      });
+
+      if (costsDiffer(stockChange.cost_before, stockChange.cost_after)) {
+        await insertCostoHistorial(client, {
+          variant_id: stockChange.variant_id,
+          sku_snapshot: stockChange.sku,
+          costo_anterior: stockChange.cost_before,
+          costo_nuevo: stockChange.cost_after ?? costoNeto,
+          origen: "factura",
+          ref_tipo: "pos_orden_compra_linea",
+          ref_id: String(lineaOcId),
+          proveedor_id: proveedorId,
+          actor: executedBy,
+        });
+      }
 
       await upsertSupplierOffer(
         client,
         proveedorId,
         variantId,
         codigoProv,
-        item.precio_unitario,
+        costoNeto,
       );
     }
 

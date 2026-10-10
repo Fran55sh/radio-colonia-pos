@@ -156,15 +156,53 @@ type SaleDecrementRow = {
   } | null;
 };
 
+/** Recalcula products.stock = SUM(variants) (D8). Orden de locks: variante ya tocada → producto. */
+export async function syncProductStockFromVariants(
+  client: DbClient,
+  productId: string,
+): Promise<number> {
+  await client.query(`SELECT id FROM products WHERE id = $1 FOR UPDATE`, [productId]);
+  const { rows } = await client.query<{ total: number }>(
+    `UPDATE products
+     SET stock = (
+       SELECT COALESCE(SUM(stock), 0)::int
+       FROM product_variants
+       WHERE product_id = products.id
+     ),
+     updated_at = NOW()
+     WHERE id = $1
+     RETURNING stock AS total`,
+    [productId],
+  );
+  return Number(rows[0]?.total ?? 0);
+}
+
+export type StockChangeResult = {
+  variant_id: string;
+  product_id: string;
+  sku: string;
+  stock_before: number;
+  stock_after: number;
+  cost_before: number | null;
+  cost_after: number | null;
+};
+
 /**
  * Un solo round-trip: descuenta stock (UPDATE condicional) y devuelve datos de venta.
  * WHERE pv.sku = $2 usa el índice UNIQUE (SKU ya normalizado a minúsculas en Node).
+ * Tras el cambio recalcula products.stock (D8).
  */
 export async function lockAndDecrementForSale(
   client: DbClient,
   sku: string,
   quantity: number,
-): Promise<CatalogRow & { price_tiers: PriceTier[] }> {
+): Promise<
+  CatalogRow & {
+    price_tiers: PriceTier[];
+    stock_before: number;
+    stock_after: number;
+  }
+> {
   const normalized = sku.trim().toLowerCase();
   const { rows } = await client.query<SaleDecrementRow>(
     `UPDATE product_variants pv
@@ -227,6 +265,10 @@ export async function lockAndDecrementForSale(
   }
 
   const row = rows[0];
+  const stockAfter = row.stock;
+  const stockBefore = stockAfter + quantity;
+  await syncProductStockFromVariants(client, row.product_id);
+
   const offer = row.offer;
   return {
     variant_id: row.variant_id,
@@ -235,7 +277,9 @@ export async function lockAndDecrementForSale(
     product_name: row.product_name,
     attributes: row.attributes,
     precio_venta: row.precio_venta,
-    stock: row.stock,
+    stock: stockAfter,
+    stock_before: stockBefore,
+    stock_after: stockAfter,
     cost_price: offer?.cost_price ?? null,
     supplier_id: offer?.supplier_id ?? null,
     supplier_code: offer?.supplier_code ?? null,
@@ -267,32 +311,70 @@ export async function getVariantIdBySku(
   return rows[0] ?? null;
 }
 
-/** Incrementa stock de venta al recibir mercadería (compras). */
+/** Incrementa stock de venta al recibir mercadería (compras). Recalcula products.stock (D8). */
 export async function lockAndIncrementForPurchase(
   client: DbClient,
   variantId: string,
   quantity: number,
   costUnitario?: number,
-): Promise<{ variant_id: string; sku: string; stock: number }> {
+): Promise<StockChangeResult> {
   if (quantity <= 0) {
     throw new AppError(400, "INVALID_QTY", "La cantidad a ingresar debe ser > 0");
   }
+
+  const locked = await client.query<{
+    variant_id: string;
+    product_id: string;
+    sku: string;
+    stock: number;
+    cost_price: string | null;
+  }>(
+    `SELECT id AS variant_id, product_id, sku, stock, cost_price::text
+     FROM product_variants
+     WHERE id = $1
+     FOR UPDATE`,
+    [variantId],
+  );
+
+  if (locked.rows.length === 0) {
+    throw new AppError(404, "VARIANT_NOT_FOUND", `Variante no encontrada: ${variantId}`);
+  }
+
+  const prev = locked.rows[0];
+  const costBefore =
+    prev.cost_price != null && prev.cost_price !== ""
+      ? Number(prev.cost_price)
+      : null;
 
   const { rows } = await client.query<{
     variant_id: string;
     sku: string;
     stock: number;
+    cost_price: string | null;
   }>(
     `UPDATE product_variants
      SET stock = stock + $1,
          cost_price = COALESCE($3::numeric, cost_price)
      WHERE id = $2
-     RETURNING id AS variant_id, sku, stock`,
-    [quantity, variantId, costUnitario != null ? costUnitario.toFixed(2) : null],
+     RETURNING id AS variant_id, sku, stock, cost_price::text`,
+    [quantity, variantId, costUnitario != null ? costUnitario.toFixed(4) : null],
   );
 
-  if (rows.length === 0) {
-    throw new AppError(404, "VARIANT_NOT_FOUND", `Variante no encontrada: ${variantId}`);
-  }
-  return rows[0];
+  const updated = rows[0];
+  const costAfter =
+    updated.cost_price != null && updated.cost_price !== ""
+      ? Number(updated.cost_price)
+      : null;
+
+  await syncProductStockFromVariants(client, prev.product_id);
+
+  return {
+    variant_id: updated.variant_id,
+    product_id: prev.product_id,
+    sku: updated.sku,
+    stock_before: prev.stock,
+    stock_after: updated.stock,
+    cost_before: costBefore,
+    cost_after: costAfter,
+  };
 }
