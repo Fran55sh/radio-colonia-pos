@@ -71,6 +71,20 @@ export async function assertRequiredSchema(): Promise<void> {
     );
   }
 
+  if (!(await tableExists("costo_historial"))) {
+    throw new Error(
+      "Falta tabla requerida: costo_historial. " +
+        "Aplicá migraciones ecommerce 0023 antes de desplegar el POS.",
+    );
+  }
+
+  if (!(await columnExists("pos_ordenes_compra_lineas", "costo_unitario_neto"))) {
+    throw new Error(
+      "Falta columna requerida: pos_ordenes_compra_lineas.costo_unitario_neto. " +
+        "Aplicá migraciones ecommerce 0023 antes de desplegar el POS.",
+    );
+  }
+
   if (env.POS_STOCK_LEDGER_ENABLED) {
     if (!(await tableExists("inventory_movements"))) {
       missing.push("inventory_movements");
