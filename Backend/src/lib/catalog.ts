@@ -177,6 +177,36 @@ export async function syncProductStockFromVariants(
   return Number(rows[0]?.total ?? 0);
 }
 
+/**
+ * Recalcula products.stock para múltiples productos en lote (F4).
+ * Deduplica, ordena por id para evitar deadlocks, y actualiza todos los productos.
+ */
+export async function syncProductsStockBatch(
+  client: DbClient,
+  productIds: string[],
+): Promise<void> {
+  if (productIds.length === 0) return;
+
+  const uniqueIds = Array.from(new Set(productIds)).sort();
+
+  await client.query(
+    `SELECT id FROM products WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
+    [uniqueIds],
+  );
+
+  await client.query(
+    `UPDATE products p
+     SET stock = (
+       SELECT COALESCE(SUM(pv.stock), 0)::int
+       FROM product_variants pv
+       WHERE pv.product_id = p.id
+     ),
+     updated_at = NOW()
+     WHERE p.id = ANY($1::uuid[])`,
+    [uniqueIds],
+  );
+}
+
 export type StockChangeResult = {
   variant_id: string;
   product_id: string;
@@ -267,7 +297,6 @@ export async function lockAndDecrementForSale(
   const row = rows[0];
   const stockAfter = row.stock;
   const stockBefore = stockAfter + quantity;
-  await syncProductStockFromVariants(client, row.product_id);
 
   const offer = row.offer;
   return {
@@ -365,8 +394,6 @@ export async function lockAndIncrementForPurchase(
     updated.cost_price != null && updated.cost_price !== ""
       ? Number(updated.cost_price)
       : null;
-
-  await syncProductStockFromVariants(client, prev.product_id);
 
   return {
     variant_id: updated.variant_id,
