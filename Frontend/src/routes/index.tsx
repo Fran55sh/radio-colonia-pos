@@ -1,6 +1,7 @@
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { toast as sonnerToast } from "sonner";
 import { LogOut, Trash2, Wifi, WifiOff, ScanLine, Plus, RefreshCw, Menu, ChevronLeft, Package } from "lucide-react";
 import { CustomerSelector } from "@/components/pos/CustomerSelector";
 import { CashMovementDialog } from "@/components/pos/CashMovementDialog";
@@ -466,6 +467,7 @@ function POS() {
           return false;
         }
         warnOfflineStock();
+        const hadCliente = selectedCliente != null;
         try {
           enqueueSale({
             ...payload,
@@ -476,6 +478,9 @@ function POS() {
         } catch (err) {
           flash(err instanceof Error ? err.message : "No se pudo encolar offline");
           return false;
+        }
+        if (hadCliente) {
+          sonnerToast.warning("Venta guardada sin conexión: se registrará sin cliente.");
         }
         setPendingOffline(loadOfflineQueue().length);
         return true;

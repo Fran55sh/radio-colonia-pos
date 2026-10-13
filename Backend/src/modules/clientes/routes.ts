@@ -11,7 +11,7 @@ import {
 export async function clientesRoutes(app: FastifyInstance) {
   app.get("/", async (request, reply) => {
     const query = listClientesQuerySchema.parse(request.query);
-    return reply.send({ clientes: await listClientes(query.search, query.limit) });
+    return reply.send(await listClientes(query.search, query.limit));
   });
 
   app.get("/:id", async (request, reply) => {

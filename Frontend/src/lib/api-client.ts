@@ -191,10 +191,14 @@ export async function fetchProductos(): Promise<ProductoCaja[]> {
   return data.productos.map(normalizeProducto);
 }
 
-export async function fetchClientes(search?: string): Promise<Cliente[]> {
+export type ListClientesResponse = {
+  items: Cliente[];
+  total: number;
+};
+
+export async function fetchClientes(search?: string): Promise<ListClientesResponse> {
   const q = search?.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
-  const data = await apiFetch<{ clientes: Cliente[] }>(`/clientes${q}`);
-  return data.clientes;
+  return apiFetch<ListClientesResponse>(`/clientes${q}`);
 }
 
 export async function createCliente(payload: CreateClientePayload): Promise<Cliente> {

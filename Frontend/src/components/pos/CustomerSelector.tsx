@@ -49,15 +49,20 @@ export function CustomerSelector({ selected, onSelect, onCreate }: Props) {
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, SEARCH_DEBOUNCE_MS);
+  /** Ignora el onSelect fantasma al abrir; Enter/clic explícito lo desactivan. */
   const suppressSelectRef = useRef(false);
 
-  const { data: clientes = [], isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["pos-clientes", debouncedSearch],
     queryFn: () => fetchClientes(debouncedSearch || undefined),
     staleTime: 30_000,
     enabled: open,
     retry: false,
   });
+
+  const clientes = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const showPartialHint = !debouncedSearch.trim() && total > clientes.length;
 
   useEffect(() => {
     if (!open) return;
@@ -77,6 +82,10 @@ export function CustomerSelector({ selected, onSelect, onCreate }: Props) {
   function handleOpenChange(next: boolean) {
     setOpen(next);
     if (!next) setSearch("");
+  }
+
+  function allowSelect() {
+    suppressSelectRef.current = false;
   }
 
   function pickCliente(cliente: Cliente | null) {
@@ -106,9 +115,14 @@ export function CustomerSelector({ selected, onSelect, onCreate }: Props) {
           align="end"
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
-          <Command shouldFilter={false}>
+          <Command
+            shouldFilter={false}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") allowSelect();
+            }}
+          >
             <CommandInput
-              placeholder="Buscar por nombre o documento…"
+              placeholder="Buscar por nombre, documento o teléfono…"
               value={search}
               onValueChange={setSearch}
             />
@@ -125,6 +139,7 @@ export function CustomerSelector({ selected, onSelect, onCreate }: Props) {
               <CommandGroup>
                 <CommandItem
                   value="consumidor-final"
+                  onPointerDown={allowSelect}
                   onSelect={() => pickCliente(null)}
                 >
                   Consumidor final
@@ -133,6 +148,7 @@ export function CustomerSelector({ selected, onSelect, onCreate }: Props) {
                   <CommandItem
                     key={c.id}
                     value={`cliente-${c.id}`}
+                    onPointerDown={allowSelect}
                     onSelect={() => pickCliente(c)}
                   >
                     <div className="flex flex-col min-w-0">
@@ -144,6 +160,11 @@ export function CustomerSelector({ selected, onSelect, onCreate }: Props) {
                   </CommandItem>
                 ))}
               </CommandGroup>
+              {showPartialHint && (
+                <p className="px-3 py-2 text-[10px] text-silver border-t border-border">
+                  Mostrando {clientes.length} de {total} — escribí para buscar
+                </p>
+              )}
             </CommandList>
           </Command>
         </PopoverContent>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -85,7 +86,9 @@ export function CustomerFormDialog({ open, onOpenChange, onSubmit, onCreated }: 
       reset();
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al crear cliente");
+      const message = err instanceof Error ? err.message : "Error al crear cliente";
+      setError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }

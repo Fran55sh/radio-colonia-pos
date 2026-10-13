@@ -56,17 +56,64 @@ function validateFiscalFields(data: {
   }
 }
 
-export async function listClientes(search?: string, limit = 50): Promise<PosCliente[]> {
+export type ListClientesResult = {
+  items: PosCliente[];
+  total: number;
+};
+
+function digitsOnly(value: string): string {
+  return value.replace(/\D/g, "");
+}
+
+/**
+ * Lista clientes. Sin búsqueda: más recientes primero (created_at DESC).
+ * Con búsqueda: unaccent + ILIKE en nombre/razon_social; documento y teléfono
+ * por dígitos (regexp_replace) solo si el término tiene dígitos.
+ */
+export async function listClientes(search?: string, limit = 50): Promise<ListClientesResult> {
+  const term = search?.trim() || "";
+  const digitTerm = digitsOnly(term);
+
+  const whereParts: string[] = [];
   const params: unknown[] = [];
-  let sql = `SELECT * FROM pos_clientes`;
-  if (search?.trim()) {
-    params.push(`%${search.trim()}%`);
-    sql += ` WHERE nombre ILIKE $1 OR documento ILIKE $1 OR razon_social ILIKE $1`;
+  let p = 1;
+
+  if (term) {
+    const namePattern = `%${term}%`;
+    whereParts.push(
+      `(unaccent(lower(nombre)) ILIKE unaccent(lower($${p}))` +
+        ` OR unaccent(lower(COALESCE(razon_social, ''))) ILIKE unaccent(lower($${p})))`,
+    );
+    params.push(namePattern);
+    p += 1;
+
+    if (digitTerm.length > 0) {
+      const digitPattern = `%${digitTerm}%`;
+      whereParts.push(
+        `(regexp_replace(COALESCE(documento, ''), '\\D', '', 'g') LIKE $${p}` +
+          ` OR regexp_replace(COALESCE(telefono, ''), '\\D', '', 'g') LIKE $${p})`,
+      );
+      params.push(digitPattern);
+      p += 1;
+    }
   }
-  params.push(limit);
-  sql += ` ORDER BY nombre LIMIT $${params.length}`;
-  const { rows } = await pool.query<PosCliente>(sql, params);
-  return rows;
+
+  const whereSql = whereParts.length > 0 ? `WHERE (${whereParts.join(" OR ")})` : "";
+  const orderSql = term ? "ORDER BY nombre ASC" : "ORDER BY created_at DESC";
+
+  const countResult = await pool.query<{ total: string }>(
+    `SELECT COUNT(*)::text AS total FROM pos_clientes ${whereSql}`,
+    params,
+  );
+  const total = Number(countResult.rows[0]?.total ?? 0);
+
+  const listParams = [...params, limit];
+  const itemsResult = await pool.query<PosCliente>(
+    `SELECT * FROM pos_clientes ${whereSql} ${orderSql} LIMIT $${p}`,
+    listParams,
+  );
+
+  return { items: itemsResult.rows, total };
 }
 
 export async function getCliente(id: number): Promise<PosCliente> {
