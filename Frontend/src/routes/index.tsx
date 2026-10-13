@@ -32,7 +32,6 @@ import { resolveUnitPrice, priceRange } from "@/lib/quantity-pricing";
 import {
   clearOfflineQueue,
   enqueueSale,
-  exceedsKnownStock,
   generateClientSaleId,
   loadOfflineQueue,
   removeFromQueue,
@@ -288,14 +287,6 @@ function POS() {
         flash("La cantidad debe ser mayor a 0");
         return;
       }
-      if (live.stock <= 0) {
-        flash(`Sin stock: ${live.nombre}`);
-        return;
-      }
-      if (qty > live.stock) {
-        flash(`Stock insuficiente (disponible: ${live.stock})`);
-        return;
-      }
 
       const tiers = live.price_tiers ?? [];
       const base = live.precio_venta;
@@ -304,12 +295,11 @@ function POS() {
         const existing = prev.find(
           (i) => i.codigo_interno.toLowerCase() === live.codigo_interno.toLowerCase(),
         );
+        const nextQty = existing ? existing.qty + qty : qty;
+        if (nextQty > live.stock) {
+          flash(`Atención: se vende sin stock (disponible: ${live.stock})`);
+        }
         if (existing) {
-          const nextQty = existing.qty + qty;
-          if (nextQty > live.stock) {
-            flash(`Stock máximo alcanzado (${live.stock})`);
-            return prev;
-          }
           return prev.map((i) =>
             i.codigo_interno.toLowerCase() === live.codigo_interno.toLowerCase()
               ? {
@@ -374,8 +364,7 @@ function POS() {
   const selectSearchResult = useCallback(
     (product: ProductoCaja) => {
       if (product.stock <= 0) {
-        flash(`Sin stock: ${product.nombre}`);
-        return;
+        flash(`Atención: se vende sin stock (disponible: ${product.stock})`);
       }
       promptAddProduct(product);
     },
@@ -463,7 +452,7 @@ function POS() {
           const available = product?.stock;
           if (available != null && item.qty > available) {
             flash(
-              `Atención: ${item.codigo_interno} supera stock disponible (${available}).`,
+              `Atención: se vende sin stock (disponible: ${available}) — ${item.codigo_interno}`,
             );
           }
         }
@@ -476,13 +465,7 @@ function POS() {
           );
           return false;
         }
-        const stockCheck = exceedsKnownStock(lineas, catalog);
-        if (!stockCheck.ok) {
-          flash(
-            `No se puede guardar offline: ${stockCheck.sku} supera stock (${stockCheck.available}).`,
-          );
-          return false;
-        }
+        warnOfflineStock();
         try {
           enqueueSale({
             ...payload,
@@ -507,14 +490,13 @@ function POS() {
           return prev.map((p) => {
             const sold = qtyBySku.get(p.codigo_interno.toLowerCase());
             if (!sold) return p;
-            return { ...p, stock: Math.max(0, p.stock - sold) };
+            return { ...p, stock: p.stock - sold };
           });
         });
       };
 
       try {
         if (!online) {
-          warnOfflineStock();
           if (!tryEnqueueOffline()) return;
           flash(`Venta guardada offline: ${method} — ${formatARS(saleTotal)}`);
           resetAfterSale();
@@ -537,7 +519,6 @@ function POS() {
           flash(msg);
           void refetch();
         } else if (!online || msg.includes("fetch")) {
-          warnOfflineStock();
           if (!tryEnqueueOffline()) return;
           flash(`Venta en cola offline: ${method}`);
           resetAfterSale();
@@ -581,8 +562,11 @@ function POS() {
       prev.map((i) => {
         if (i.codigo_interno.toLowerCase() !== code.toLowerCase()) return i;
         const product = findCatalogProduct(catalog, code);
-        const maxStock = product?.stock ?? i.qty;
-        const nextQty = Math.min(maxStock, Math.max(1, i.qty + delta));
+        const nextQty = Math.max(1, i.qty + delta);
+        const available = product?.stock ?? i.stock;
+        if (nextQty > available) {
+          flash(`Atención: se vende sin stock (disponible: ${available})`);
+        }
         const base = i.base_precio_venta ?? product?.precio_venta ?? i.precio_venta;
         const tiers = i.price_tiers ?? product?.price_tiers ?? [];
         return {
@@ -1083,7 +1067,9 @@ function POS() {
                     </div>
                     <div className="flex items-center gap-3 text-xs">
                       <span className="text-silver-light font-semibold tabular-nums">{formatCatalogPrice(p, formatARS)}</span>
-                      <span className="text-silver/60">stk {p.stock}</span>
+                      <span className={p.stock <= 0 ? "text-destructive" : "text-silver/60"}>
+                        stk {p.stock}
+                      </span>
                     </div>
                   </button>
                 ))}
@@ -1105,13 +1091,11 @@ function POS() {
                   type="button"
                   onClick={() => {
                     if (p.stock <= 0) {
-                      flash(`Sin stock: ${p.nombre}`);
-                      return;
+                      flash(`Atención: se vende sin stock (disponible: ${p.stock})`);
                     }
                     promptAddProduct(p);
                   }}
-                  disabled={p.stock <= 0}
-                  className="group w-full flex flex-col sm:grid sm:grid-cols-[auto_1fr_auto_auto] sm:items-center gap-1 sm:gap-3 px-4 sm:px-5 py-3.5 sm:py-2.5 text-left hover:bg-charcoal transition-colors disabled:opacity-40 min-h-14"
+                  className={`group w-full flex flex-col sm:grid sm:grid-cols-[auto_1fr_auto_auto] sm:items-center gap-1 sm:gap-3 px-4 sm:px-5 py-3.5 sm:py-2.5 text-left hover:bg-charcoal transition-colors min-h-14 ${p.stock <= 0 ? "opacity-70" : ""}`}
                 >
                   <div className="flex items-center gap-2 min-w-0 sm:contents">
                     <span className="text-[10px] uppercase tracking-wider text-primary font-bold sm:w-20 shrink-0">
@@ -1123,7 +1107,9 @@ function POS() {
                     <span className="text-sm sm:text-xs font-semibold text-silver-light tabular-nums">
                       {formatCatalogPrice(p, formatARS)}
                     </span>
-                    <span className="sm:hidden text-[11px] text-silver/60">stk {p.stock}</span>
+                    <span className={`sm:hidden text-[11px] ${p.stock <= 0 ? "text-destructive" : "text-silver/60"}`}>
+                      stk {p.stock}
+                    </span>
                     <Plus className="hidden sm:block size-3.5 text-silver/40 group-hover:text-primary" />
                   </div>
                 </button>
@@ -1254,12 +1240,16 @@ function POS() {
               ref={qtyRef}
               type="number"
               min={1}
-              max={pendingProduct?.stock ?? 1}
               value={qtyInput}
               onChange={(e) => setQtyInput(e.target.value)}
               className="h-12 text-lg font-semibold tabular-nums bg-midnight border-primary text-silver-light"
               autoFocus
             />
+            {pendingProduct && pendingProduct.stock <= 0 && (
+              <p className="text-xs text-destructive">
+                Atención: se vende sin stock (disponible: {pendingProduct.stock})
+              </p>
+            )}
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0">

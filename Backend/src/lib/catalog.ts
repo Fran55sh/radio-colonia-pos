@@ -218,7 +218,8 @@ export type StockChangeResult = {
 };
 
 /**
- * Un solo round-trip: descuenta stock (UPDATE condicional) y devuelve datos de venta.
+ * Un solo round-trip: descuenta stock y devuelve datos de venta.
+ * Permite stock resultante negativo (venta sin stock desde el POS).
  * WHERE pv.sku = $2 usa el índice UNIQUE (SKU ya normalizado a minúsculas en Node).
  * Tras el cambio recalcula products.stock (D8).
  */
@@ -241,7 +242,6 @@ export async function lockAndDecrementForSale(
      WHERE p.id = pv.product_id
        AND pv.sku = $2
        AND p.is_active = TRUE
-       AND pv.stock >= $1
      RETURNING
        pv.id AS variant_id,
        p.id AS product_id,
@@ -277,21 +277,7 @@ export async function lockAndDecrementForSale(
   );
 
   if (rows.length === 0) {
-    const exists = await client.query<{ id: string; stock: number }>(
-      `SELECT pv.id, pv.stock
-       FROM product_variants pv
-       INNER JOIN products p ON p.id = pv.product_id
-       WHERE pv.sku = $1 AND p.is_active = TRUE`,
-      [normalized],
-    );
-    if (exists.rows.length === 0) {
-      throw new AppError(404, "PRODUCT_NOT_FOUND", `Producto no encontrado: ${normalized}`);
-    }
-    throw new AppError(409, "INSUFFICIENT_STOCK", `Stock insuficiente para ${normalized}`, {
-      codigo_interno: normalized,
-      cantidad_solicitada: quantity,
-      stock_disponible: exists.rows[0].stock,
-    });
+    throw new AppError(404, "PRODUCT_NOT_FOUND", `Producto no encontrado: ${normalized}`);
   }
 
   const row = rows[0];

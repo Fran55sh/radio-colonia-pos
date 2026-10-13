@@ -58,7 +58,10 @@ export function generateClientSaleId(): string {
   return `offline-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
-/** True si alguna línea supera el stock conocido del catálogo. */
+/**
+ * Detecta líneas que superan el stock conocido del catálogo.
+ * Solo informativo: el POS permite vender sin stock (online y offline).
+ */
 export function exceedsKnownStock(
   lineas: Array<{ codigo_interno: string; cantidad: number }>,
   catalog: Array<{ codigo_interno: string; stock: number }>,
