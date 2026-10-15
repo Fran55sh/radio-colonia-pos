@@ -54,4 +54,11 @@ describe("formatComprobanteNumero", () => {
     expect(formatted).toMatch(/0001/);
     expect(formatted).toMatch(/00000042/);
   });
+
+  it("labels NC/ND with the same letter as the original", () => {
+    expect(formatComprobanteNumero(1, 3, 1)).toMatch(/NotadeCréditoA/);
+    expect(formatComprobanteNumero(1, 2, 1)).toMatch(/NotadeDébitoA/);
+    expect(formatComprobanteNumero(1, 8, 1)).toMatch(/NotadeCréditoB/);
+    expect(formatComprobanteNumero(1, 7, 1)).toMatch(/NotadeDébitoB/);
+  });
 });

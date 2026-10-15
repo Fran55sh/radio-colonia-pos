@@ -1,7 +1,9 @@
-import { ArcaWSFEError } from "@ramiidv/arca-facturacion";
+import { ArcaWSFEError, DocTipo } from "@ramiidv/arca-facturacion";
 import { getArcaConfig, isArcaConfigured } from "../../config/arca.js";
 import { AppError } from "../../middleware/errors.js";
 import { getArcaClient } from "./arca-client.js";
+import { cbteTipoPorCondicionIva } from "./cbte-tipo.js";
+import { CONDICION_IVA_CF } from "./iva-condiciones.js";
 import { buildQrUrl, lineasToArcaItems } from "./mappers.js";
 import { resolverComprobante } from "./resolver.js";
 import {
@@ -74,7 +76,30 @@ async function ejecutarEmision(
     );
   }
 
-  const resuelto = resolverComprobante(ctx.cliente);
+  let resuelto;
+  try {
+    resuelto = resolverComprobante(ctx.cliente);
+  } catch (err) {
+    if (!(err instanceof AppError)) throw err;
+    const condicion = ctx.cliente?.condicion_iva_receptor_id ?? CONDICION_IVA_CF;
+    await ensureComprobantePendiente(ventaId, {
+      ambiente: arcaConfig.ambiente,
+      emisor_cuit: String(arcaConfig.cuit),
+      punto_venta: arcaConfig.ptoVta,
+      cbte_tipo: cbteTipoPorCondicionIva(condicion),
+      doc_tipo: DocTipo.CUIT,
+      doc_nro: 0,
+      condicion_iva_receptor_id: condicion,
+      neto_gravado: ctx.neto_gravado,
+      iva_total: ctx.iva_total,
+      exento: ctx.exento,
+      total: ctx.total,
+    });
+    await marcarComprobanteError(ventaId, err.code, err.message, err);
+    const row = await getComprobanteByVentaId(ventaId);
+    return rowToFiscalResponse(row!);
+  }
+
   const items = lineasToArcaItems(ctx.lineas);
 
   await ensureComprobantePendiente(ventaId, {

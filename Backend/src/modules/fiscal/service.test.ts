@@ -140,6 +140,46 @@ describe("emitirComprobanteVenta idempotency", () => {
     expect(marcarComprobanteEmitido).toHaveBeenCalled();
   });
 
+  it("envía Factura A a ARCA con DocTipo 80, CondicionIVAReceptorId de monotributo e IVA discriminado", async () => {
+    resolverComprobante.mockReturnValue({
+      cbteTipo: 1,
+      docTipo: 80,
+      docNro: 20123456786,
+      condicionIva: 6,
+      label: "Factura A — Monotributo",
+    });
+    lineasToArcaItems.mockReturnValue([{ neto: 100, iva: 5 }]);
+    getComprobanteByVentaId
+      .mockResolvedValueOnce({ estado: "pendiente", cae: null })
+      .mockResolvedValue({
+        estado: "emitido",
+        cae: "111",
+        cbte_nro: 3,
+        ambiente: "dev",
+      });
+    ensureComprobantePendiente.mockResolvedValue({ estado: "pendiente" });
+    const facturar = vi.fn().mockResolvedValue({
+      aprobada: true,
+      cae: "111",
+      cbteNro: 3,
+      caeVencimiento: "20261231",
+    });
+    getArcaClient.mockReturnValue({ facturar });
+    rowToFiscalResponse.mockImplementation((row: { estado: string; cae: string }) => row);
+
+    await emitirComprobanteVenta(10);
+
+    expect(facturar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cbteTipo: 1,
+        docTipo: 80,
+        docNro: 20123456786,
+        condicionIva: 6,
+        items: [{ neto: 100, iva: 5 }],
+      }),
+    );
+  });
+
   it("maybeEmitirDespuesDeVenta skips when skipFiscal", async () => {
     const result = await maybeEmitirDespuesDeVenta(10, { skipFiscal: true });
     expect(result).toBeNull();
