@@ -48,7 +48,6 @@ Servidor en `http://localhost:3001` (por defecto).
 | Caja | `GET /api/v1/caja/sesiones/:id/resumen` | Totales + efectivo esperado |
 | Caja | `POST /api/v1/caja/movimientos` | Ingreso / retiro / gasto (retiro → PIN admin) |
 | Caja | `POST /api/v1/caja/sesiones/:id/cerrar` | Cierre con arqueo (diff ≠ 0 → PIN admin) |
-| Compras | `POST /api/v1/compras/ordenes` | Orden con códigos de proveedor |
 | Contabilidad | `GET /api/v1/contabilidad/iva/ventas` | Libro IVA ventas |
 | Contabilidad | `POST /api/v1/contabilidad/iva/compras/facturas` | Crédito fiscal compras |
 | Clientes | `GET /api/v1/clientes` | CRUD clientes (búsqueda `?search=`) |
@@ -77,14 +76,13 @@ El contenedor `backend` ejecuta migración y seed al iniciar (entrypoint Node, s
 | `CORS_ORIGIN` | Origen del frontend |
 | `POS_ACCESS_PIN` | PIN de caja (**obligatorio en producción**; no uses `1234`) |
 | `POS_ADMIN_PIN` | PIN con rol `admin` (recomendado) |
-| `POS_COMPRAS_PIN` | PIN con rol `compras` (opcional) |
-| `POS_DEFAULT_ROLE` | Rol del PIN de caja: `caja` \| `compras` \| `admin` (default `caja`) |
+| `POS_DEFAULT_ROLE` | Rol del PIN de caja: `caja` \| `admin` (default `caja`) |
 | `POS_JWT_SECRET` | Secreto JWT (**obligatorio en producción**, mín. 16 chars) |
 | `POS_SESSION_HOURS` | Duración sesión (default 12) |
 | `POS_CAJA_REQUIRE_SESSION` | Exigir sesión de caja para vender (`true`/`false`, default `false`) |
 | `API_TOKEN` | Opcional: Bearer para scripts (rol admin). Vacío si no se usa |
 
-Roles: `caja` < `compras` < `admin`. Compras exige ≥`compras`; analytics/contabilidad exigen `admin`; fiscal exige ≥`caja`. Clientes (listar/alta en caja) exige ≥`caja`. Login tiene rate-limit + lockout tras 5 fallos.
+Roles: `caja` < `admin`. Analytics/contabilidad exigen `admin`; fiscal y clientes (listar/alta en caja) exigen ≥`caja`. Login tiene rate-limit + lockout tras 5 fallos. La carga de facturas de compra vive en el admin del ecommerce.
 | `ARCA_ENABLED` | `true` para emitir en homologación |
 | `ARCA_CUIT` | CUIT emisor (11 dígitos) |
 | `ARCA_PTO_VTA` | Punto de venta ARCA |

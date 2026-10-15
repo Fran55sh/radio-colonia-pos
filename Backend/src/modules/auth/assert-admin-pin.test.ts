@@ -6,7 +6,6 @@ vi.mock("../../config/env.js", () => ({
   env: {
     POS_ADMIN_PIN: "secret-admin",
     POS_ACCESS_PIN: "caja-pin",
-    POS_COMPRAS_PIN: undefined,
     POS_DEFAULT_ROLE: "caja",
     NODE_ENV: "test",
   },

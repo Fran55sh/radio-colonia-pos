@@ -1,6 +1,6 @@
 # radio-colonia-pos
 
-Sistema POS y gestión comercial para Radio Colonia. **Comparte la base PostgreSQL del ecommerce** (`radiocolonia_db`): el catálogo y el stock viven en `products` / `product_variants`; el POS solo usa tablas `pos_*` para ventas, IVA, clientes y compras.
+Sistema POS y gestión comercial para Radio Colonia. **Comparte la base PostgreSQL del ecommerce** (`radiocolonia_db`): el catálogo y el stock viven en `products` / `product_variants`; el POS usa tablas `pos_*` para ventas, IVA, clientes y caja. Las facturas de compra se cargan en el admin del ecommerce (las tablas `pos_compras*` se conservan). Ver [MIGRACION_COMPRAS.md](MIGRACION_COMPRAS.md).
 
 Ver también: [DB_UNIFICATION.md](../Radio%20Colonia/app/docs/DB_UNIFICATION.md) en el repo del ecommerce.
 

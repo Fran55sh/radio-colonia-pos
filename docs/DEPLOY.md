@@ -71,9 +71,8 @@ Variables obligatorias del POS:
 | `DB_*` | Copiadas del ecommerce **o** usuario `pos_app` least-privilege (ver abajo) |
 | `CORS_ORIGIN` | URL pública del frontend POS |
 | `POS_ACCESS_PIN` | PIN de caja (**obligatorio**; alfanumérico largo en prod; no `1234`) |
-| `POS_ADMIN_PIN` | PIN con rol admin (recomendado; compras+analytics+contabilidad+clientes+fiscal) |
-| `POS_COMPRAS_PIN` | Opcional; rol compras |
-| `POS_DEFAULT_ROLE` | Rol del PIN de caja: `caja` (default), `compras` o `admin` |
+| `POS_ADMIN_PIN` | PIN con rol admin (recomendado; analytics+contabilidad+clientes+fiscal) |
+| `POS_DEFAULT_ROLE` | Rol del PIN de caja: `caja` (default) o `admin` |
 | `POS_JWT_SECRET` | Secreto JWT (**obligatorio**, mín. 16 chars; rotar si se filtró) |
 | `POS_SESSION_HOURS` | Duración sesión (default 12) |
 | `POS_CAJA_REQUIRE_SESSION` | `true`/`false` — exigir sesión de caja abierta para vender (default `false` en código; compose lo setea `true`) |

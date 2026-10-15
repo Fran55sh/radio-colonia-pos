@@ -1,8 +1,8 @@
-import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { toast as sonnerToast } from "sonner";
-import { LogOut, Trash2, Wifi, WifiOff, ScanLine, Plus, RefreshCw, Menu, ChevronLeft, Package } from "lucide-react";
+import { LogOut, Trash2, Wifi, WifiOff, ScanLine, Plus, RefreshCw, Menu, ChevronLeft } from "lucide-react";
 import { CustomerSelector } from "@/components/pos/CustomerSelector";
 import { CashMovementDialog } from "@/components/pos/CashMovementDialog";
 import { CashSessionBanner } from "@/components/pos/CashSessionBanner";
@@ -24,7 +24,6 @@ import {
 import {
   clearToken,
   getAuthRequired,
-  hasRoleAtLeast,
   isAuthenticated,
   setAuthRequired,
 } from "@/lib/auth-session";
@@ -617,8 +616,6 @@ function POS() {
     void navigate({ to: "/login" });
   };
 
-  const canAccessCompras = hasRoleAtLeast("compras");
-
   const connectionBadge = (
     <button
       onClick={() => void toggleOnline()}
@@ -700,17 +697,6 @@ function POS() {
             <RefreshCw className={`size-3.5 ${isLoading ? "animate-spin" : ""}`} />
           </button>
 
-          {canAccessCompras && (
-            <Link
-              to="/compras"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border text-xs text-silver hover:text-silver-light hover:bg-charcoal"
-              title="Compras e importación de facturas"
-            >
-              <Package className="size-3.5" />
-              Compras
-            </Link>
-          )}
-
           {connectionBadge}
 
           <button
@@ -788,20 +774,6 @@ function POS() {
                   <RefreshCw className={`size-4 ${isLoading ? "animate-spin" : ""}`} />
                   Actualizar catálogo
                 </Button>
-
-                {canAccessCompras && (
-                  <Button
-                    variant="outline"
-                    className="justify-start border-border text-silver-light gap-2"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      void navigate({ to: "/compras" });
-                    }}
-                  >
-                    <Package className="size-4" />
-                    Compras
-                  </Button>
-                )}
 
                 <Button
                   variant="outline"

@@ -64,12 +64,13 @@ const envSchema = z.object({
     .optional()
     .transform((v) => v === "true"),
   POS_ACCESS_PIN: z.string().min(4).optional(),
-  /** PIN con rol admin (compras + analytics + contabilidad + clientes + fiscal). */
+  /** PIN con rol admin (analytics + contabilidad + clientes + fiscal). */
   POS_ADMIN_PIN: z.string().min(4).optional(),
-  /** PIN con rol compras (caja + módulo compras). */
-  POS_COMPRAS_PIN: z.string().min(4).optional(),
-  /** Rol del PIN de caja si no coincide admin/compras. Default caja. */
-  POS_DEFAULT_ROLE: z.enum(["caja", "compras", "admin"]).default("caja"),
+  /** Rol del PIN de caja si no coincide admin. Default caja. */
+  POS_DEFAULT_ROLE: z
+    .enum(["caja", "compras", "admin"])
+    .default("caja")
+    .transform((v) => (v === "compras" ? "caja" : v)),
   POS_JWT_SECRET: z.string().min(16).optional(),
   POS_SESSION_HOURS: z.coerce.number().int().positive().default(12),
   /** Si true, ventas POS exigen sesión de caja abierta (o caja_sesion_id válido). */
@@ -85,7 +86,6 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
-  COMPRAS_PDF_DIR: z.string().default("./data/compras-pdfs"),
 });
 
 const databaseUrl = resolveDatabaseUrl();
@@ -100,13 +100,11 @@ export const env = envSchema.parse({
   POS_SEED_DEMO: process.env.POS_SEED_DEMO,
   POS_ACCESS_PIN: process.env.POS_ACCESS_PIN || undefined,
   POS_ADMIN_PIN: process.env.POS_ADMIN_PIN || undefined,
-  POS_COMPRAS_PIN: process.env.POS_COMPRAS_PIN || undefined,
   POS_DEFAULT_ROLE: process.env.POS_DEFAULT_ROLE,
   POS_JWT_SECRET: process.env.POS_JWT_SECRET || undefined,
   POS_SESSION_HOURS: process.env.POS_SESSION_HOURS,
   POS_CAJA_REQUIRE_SESSION: process.env.POS_CAJA_REQUIRE_SESSION,
   POS_STOCK_LEDGER_ENABLED: process.env.POS_STOCK_LEDGER_ENABLED,
-  COMPRAS_PDF_DIR: process.env.COMPRAS_PDF_DIR,
 });
 
 if (env.NODE_ENV === "production") {

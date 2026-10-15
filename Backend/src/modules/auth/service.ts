@@ -2,7 +2,7 @@ import { createHmac, createHash, timingSafeEqual } from "crypto";
 import { env } from "../../config/env.js";
 import { AppError } from "../../middleware/errors.js";
 
-export type PosRole = "caja" | "compras" | "admin";
+export type PosRole = "caja" | "admin";
 
 export type JwtPayload = {
   sub: string;
@@ -61,9 +61,6 @@ export function resolveRoleForPin(pin: string): PosRole | null {
 
   if (env.POS_ADMIN_PIN && pinsEqual(env.POS_ADMIN_PIN, pin)) {
     return "admin";
-  }
-  if (env.POS_COMPRAS_PIN && pinsEqual(env.POS_COMPRAS_PIN, pin)) {
-    return "compras";
   }
   if (pinsEqual(env.POS_ACCESS_PIN, pin)) {
     return env.POS_DEFAULT_ROLE;
@@ -139,9 +136,14 @@ export function verifyToken(token: string): JwtPayload {
     throw new AppError(401, "UNAUTHORIZED", "Token inválido");
   }
 
-  let parsed: JwtPayload & { role?: PosRole };
+  let parsed: { sub?: unknown; role?: unknown; iat?: unknown; exp?: unknown };
   try {
-    parsed = JSON.parse(b64urlDecode(payload).toString("utf8")) as JwtPayload;
+    parsed = JSON.parse(b64urlDecode(payload).toString("utf8")) as {
+      sub?: unknown;
+      role?: unknown;
+      iat?: unknown;
+      exp?: unknown;
+    };
   } catch {
     throw new AppError(401, "UNAUTHORIZED", "Token inválido");
   }
@@ -153,12 +155,20 @@ export function verifyToken(token: string): JwtPayload {
     throw new AppError(401, "UNAUTHORIZED", "Sesión expirada");
   }
 
-  const role = parsed.role ?? "admin";
-  if (role !== "caja" && role !== "compras" && role !== "admin") {
+  const rawRole = typeof parsed.role === "string" ? parsed.role : "admin";
+  let role: PosRole | null = null;
+  if (rawRole === "caja" || rawRole === "compras") role = "caja";
+  if (rawRole === "admin") role = "admin";
+  if (!role) {
     throw new AppError(401, "UNAUTHORIZED", "Token inválido");
   }
 
-  return { ...parsed, role };
+  return {
+    sub: "pos",
+    role,
+    iat: typeof parsed.iat === "number" ? parsed.iat : 0,
+    exp: parsed.exp,
+  };
 }
 
 export function loginWithPin(pin: string): {

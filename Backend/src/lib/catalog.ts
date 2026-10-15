@@ -207,16 +207,6 @@ export async function syncProductsStockBatch(
   );
 }
 
-export type StockChangeResult = {
-  variant_id: string;
-  product_id: string;
-  sku: string;
-  stock_before: number;
-  stock_after: number;
-  cost_before: number | null;
-  cost_after: number | null;
-};
-
 /**
  * Un solo round-trip: descuenta stock y devuelve datos de venta.
  * Permite stock resultante negativo (venta sin stock desde el POS).
@@ -304,90 +294,5 @@ export async function lockAndDecrementForSale(
       row.product_price_tiers,
       row.variant_price_tiers,
     ),
-  };
-}
-
-export async function getVariantIdBySku(
-  client: DbClient,
-  sku: string,
-): Promise<{ variant_id: string; product_id: string; nombre: string } | null> {
-  const normalized = sku.trim().toLowerCase();
-  const { rows } = await client.query<{
-    variant_id: string;
-    product_id: string;
-    nombre: string;
-  }>(
-    `SELECT pv.id AS variant_id, p.id AS product_id, p.name AS nombre
-     FROM product_variants pv
-     INNER JOIN products p ON p.id = pv.product_id
-     WHERE pv.sku = $1`,
-    [normalized],
-  );
-  return rows[0] ?? null;
-}
-
-/** Incrementa stock de venta al recibir mercadería (compras). Recalcula products.stock (D8). */
-export async function lockAndIncrementForPurchase(
-  client: DbClient,
-  variantId: string,
-  quantity: number,
-  costUnitario?: number,
-): Promise<StockChangeResult> {
-  if (quantity <= 0) {
-    throw new AppError(400, "INVALID_QTY", "La cantidad a ingresar debe ser > 0");
-  }
-
-  const locked = await client.query<{
-    variant_id: string;
-    product_id: string;
-    sku: string;
-    stock: number;
-    cost_price: string | null;
-  }>(
-    `SELECT id AS variant_id, product_id, sku, stock, cost_price::text
-     FROM product_variants
-     WHERE id = $1
-     FOR UPDATE`,
-    [variantId],
-  );
-
-  if (locked.rows.length === 0) {
-    throw new AppError(404, "VARIANT_NOT_FOUND", `Variante no encontrada: ${variantId}`);
-  }
-
-  const prev = locked.rows[0];
-  const costBefore =
-    prev.cost_price != null && prev.cost_price !== ""
-      ? Number(prev.cost_price)
-      : null;
-
-  const { rows } = await client.query<{
-    variant_id: string;
-    sku: string;
-    stock: number;
-    cost_price: string | null;
-  }>(
-    `UPDATE product_variants
-     SET stock = stock + $1,
-         cost_price = COALESCE($3::numeric, cost_price)
-     WHERE id = $2
-     RETURNING id AS variant_id, sku, stock, cost_price::text`,
-    [quantity, variantId, costUnitario != null ? costUnitario.toFixed(4) : null],
-  );
-
-  const updated = rows[0];
-  const costAfter =
-    updated.cost_price != null && updated.cost_price !== ""
-      ? Number(updated.cost_price)
-      : null;
-
-  return {
-    variant_id: updated.variant_id,
-    product_id: prev.product_id,
-    sku: updated.sku,
-    stock_before: prev.stock,
-    stock_after: updated.stock,
-    cost_before: costBefore,
-    cost_after: costAfter,
   };
 }
