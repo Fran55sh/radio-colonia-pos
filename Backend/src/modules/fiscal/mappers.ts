@@ -63,8 +63,16 @@ export function cbteTipoLabel(cbteTipo: number): string {
   switch (cbteTipo) {
     case CbteTipo.FACTURA_A:
       return "Factura A";
+    case CbteTipo.NOTA_DEBITO_A:
+      return "Nota de Débito A";
+    case CbteTipo.NOTA_CREDITO_A:
+      return "Nota de Crédito A";
     case CbteTipo.FACTURA_B:
       return "Factura B";
+    case CbteTipo.NOTA_DEBITO_B:
+      return "Nota de Débito B";
+    case CbteTipo.NOTA_CREDITO_B:
+      return "Nota de Crédito B";
     case CbteTipo.FACTURA_C:
       return "Factura C";
     default:

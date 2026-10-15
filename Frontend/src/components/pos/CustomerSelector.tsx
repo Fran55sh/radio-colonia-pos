@@ -13,7 +13,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { Cliente } from "@/lib/api-client";
 import { fetchClientes } from "@/lib/api-client";
-import { CONDICION_IVA_RI, labelCondicionIva } from "@/lib/iva-condiciones";
+import { labelCondicionIva, requiereFacturaA } from "@/lib/iva-condiciones";
 import { CustomerFormDialog } from "./CustomerFormDialog";
 import type { CreateClientePayload } from "@/lib/api-client";
 
@@ -22,7 +22,7 @@ const SEARCH_DEBOUNCE_MS = 250;
 function resolveComprobanteLabel(cliente: Cliente | null): string {
   if (!cliente) return "Factura B — Consumidor final";
   const cuit = cliente.documento?.replace(/\D/g, "");
-  if (cuit?.length === 11 && cliente.condicion_iva_receptor_id === CONDICION_IVA_RI) {
+  if (cuit?.length === 11 && requiereFacturaA(cliente.condicion_iva_receptor_id)) {
     return "Factura A";
   }
   return `Factura B — ${labelCondicionIva(cliente.condicion_iva_receptor_id)}`;

@@ -113,7 +113,20 @@ export async function ensureComprobantePendiente(
       doc_tipo, doc_nro, condicion_iva_receptor_id,
       neto_gravado, iva_total, exento, total
     ) VALUES ($1, 'pendiente', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-    ON CONFLICT (venta_id) DO NOTHING`,
+    ON CONFLICT (venta_id) DO UPDATE SET
+      cbte_tipo = EXCLUDED.cbte_tipo,
+      doc_tipo = EXCLUDED.doc_tipo,
+      doc_nro = EXCLUDED.doc_nro,
+      condicion_iva_receptor_id = EXCLUDED.condicion_iva_receptor_id,
+      neto_gravado = EXCLUDED.neto_gravado,
+      iva_total = EXCLUDED.iva_total,
+      exento = EXCLUDED.exento,
+      total = EXCLUDED.total,
+      estado = 'pendiente',
+      error_code = NULL,
+      error_message = NULL,
+      updated_at = NOW()
+    WHERE pos_comprobantes_fiscales.estado IN ('pendiente', 'error')`,
     [
       ventaId,
       data.ambiente,
