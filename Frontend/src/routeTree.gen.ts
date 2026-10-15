@@ -11,9 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ComprasIndexRouteImport } from './routes/compras/index'
-import { Route as ComprasImportarRouteImport } from './routes/compras/importar'
-import { Route as ComprasFacturasNuevaRouteImport } from './routes/compras/facturas/nueva'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -25,74 +22,31 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ComprasIndexRoute = ComprasIndexRouteImport.update({
-  id: '/compras/',
-  path: '/compras/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ComprasImportarRoute = ComprasImportarRouteImport.update({
-  id: '/compras/importar',
-  path: '/compras/importar',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ComprasFacturasNuevaRoute = ComprasFacturasNuevaRouteImport.update({
-  id: '/compras/facturas/nueva',
-  path: '/compras/facturas/nueva',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/compras/importar': typeof ComprasImportarRoute
-  '/compras/': typeof ComprasIndexRoute
-  '/compras/facturas/nueva': typeof ComprasFacturasNuevaRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/compras/importar': typeof ComprasImportarRoute
-  '/compras': typeof ComprasIndexRoute
-  '/compras/facturas/nueva': typeof ComprasFacturasNuevaRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/compras/importar': typeof ComprasImportarRoute
-  '/compras/': typeof ComprasIndexRoute
-  '/compras/facturas/nueva': typeof ComprasFacturasNuevaRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/login'
-    | '/compras/importar'
-    | '/compras/'
-    | '/compras/facturas/nueva'
+  fullPaths: '/' | '/login'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/login'
-    | '/compras/importar'
-    | '/compras'
-    | '/compras/facturas/nueva'
-  id:
-    | '__root__'
-    | '/'
-    | '/login'
-    | '/compras/importar'
-    | '/compras/'
-    | '/compras/facturas/nueva'
+  to: '/' | '/login'
+  id: '__root__' | '/' | '/login'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
-  ComprasImportarRoute: typeof ComprasImportarRoute
-  ComprasIndexRoute: typeof ComprasIndexRoute
-  ComprasFacturasNuevaRoute: typeof ComprasFacturasNuevaRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -111,36 +65,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/compras/': {
-      id: '/compras/'
-      path: '/compras'
-      fullPath: '/compras/'
-      preLoaderRoute: typeof ComprasIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/compras/importar': {
-      id: '/compras/importar'
-      path: '/compras/importar'
-      fullPath: '/compras/importar'
-      preLoaderRoute: typeof ComprasImportarRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/compras/facturas/nueva': {
-      id: '/compras/facturas/nueva'
-      path: '/compras/facturas/nueva'
-      fullPath: '/compras/facturas/nueva'
-      preLoaderRoute: typeof ComprasFacturasNuevaRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
-  ComprasImportarRoute: ComprasImportarRoute,
-  ComprasIndexRoute: ComprasIndexRoute,
-  ComprasFacturasNuevaRoute: ComprasFacturasNuevaRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

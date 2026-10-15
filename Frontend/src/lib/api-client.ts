@@ -86,7 +86,7 @@ export type OfflineBatchResult = {
   }>;
 };
 
-export type PosRole = "caja" | "compras" | "admin";
+export type PosRole = "caja" | "admin";
 
 export type LoginResult = {
   token: string;
@@ -128,14 +128,12 @@ async function apiFetch<T>(
     if (!opts?.skipAuthRedirect) {
       handleUnauthorized();
     }
-    const message =
-      (data as { message?: string }).message ?? "Sesión expirada o no autorizada";
+    const message = (data as { message?: string }).message ?? "Sesión expirada o no autorizada";
     throw new Error(message);
   }
 
   if (res.status === 403) {
-    const message =
-      (data as { message?: string }).message ?? "No tenés permiso para esta acción";
+    const message = (data as { message?: string }).message ?? "No tenés permiso para esta acción";
     throw new Error(message);
   }
 
@@ -176,7 +174,12 @@ function normalizeProducto(p: ProductoCaja): ProductoCaja {
   const raw = p.price_tiers ?? [];
   const tiers = normalizeTiers(
     raw.map((t) => {
-      const row = t as { minQty?: number; min_qty?: number; unitPrice?: number; unit_price?: number };
+      const row = t as {
+        minQty?: number;
+        min_qty?: number;
+        unitPrice?: number;
+        unit_price?: number;
+      };
       return {
         minQty: Number(row.minQty ?? row.min_qty ?? 0),
         unitPrice: Number(row.unitPrice ?? row.unit_price ?? 0),
@@ -215,19 +218,14 @@ export async function createVenta(payload: CreateSalePayload): Promise<CreateSal
   });
 }
 
-export async function retryFiscal(
-  ventaId: number,
-): Promise<{ fiscal: FiscalResult | null }> {
-  return apiFetch<{ fiscal: FiscalResult | null }>(
-    `/fiscal/ventas/${ventaId}/reintentar`,
-    { method: "POST", body: JSON.stringify({}) },
-  );
+export async function retryFiscal(ventaId: number): Promise<{ fiscal: FiscalResult | null }> {
+  return apiFetch<{ fiscal: FiscalResult | null }>(`/fiscal/ventas/${ventaId}/reintentar`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
-
-export async function syncOfflineVentas(
-  ventas: CreateSalePayload[],
-): Promise<OfflineBatchResult> {
+export async function syncOfflineVentas(ventas: CreateSalePayload[]): Promise<OfflineBatchResult> {
   return apiFetch<OfflineBatchResult>("/pos/ventas/offline-batch", {
     method: "POST",
     body: JSON.stringify({ ventas }),
@@ -280,9 +278,7 @@ export type CajaMovimiento = {
 };
 
 /** Returns null when no open session (404). */
-export async function fetchSesionActual(
-  puesto = "Caja 01",
-): Promise<CajaSesion | null> {
+export async function fetchSesionActual(puesto = "Caja 01"): Promise<CajaSesion | null> {
   const token = getToken();
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -390,197 +386,4 @@ export async function checkApiConnection(): Promise<ApiConnectionStatus> {
 export async function checkApiHealth(): Promise<boolean> {
   const s = await checkApiConnection();
   return s.online;
-}
-
-/* —— Compras / importación factura PDF —— */
-
-export type NormalizedInvoiceItem = {
-  codigo_proveedor: string | null;
-  descripcion: string;
-  cantidad: number;
-  precio_unitario: number;
-  descuento: number;
-  descuento_porcentaje?: number;
-  alicuota_iva?: number;
-  importe: number;
-  neto_linea?: number | null;
-  iva_linea?: number | null;
-  total_linea?: number | null;
-  variant_id: string | null;
-  sku: string | null;
-  producto_nombre: string | null;
-  encontrado: boolean;
-  requiere_revision: boolean;
-  confirmar_cambio_mapeo?: boolean;
-};
-
-export type NormalizedInvoice = {
-  proveedor: {
-    cuit: string | null;
-    razon_social: string | null;
-    proveedor_id: string | null;
-    se_creara?: boolean;
-  };
-  factura: {
-    tipo: string | null;
-    punto_venta: string | null;
-    numero: string | null;
-    fecha: string | null;
-    condicion_iva?: string | null;
-  };
-  items: NormalizedInvoiceItem[];
-  totales: {
-    subtotal: number | null;
-    iva: number | null;
-    total: number | null;
-    descuento_total?: number | null;
-    exento?: number | null;
-  };
-};
-
-export type ImportacionValidationIssue = {
-  level: "error" | "warning";
-  code: string;
-  message: string;
-  item_index?: number;
-};
-
-export type CompraImportacion = {
-  id: number;
-  estado: string;
-  origen?: string;
-  proveedor_id: string | null;
-  proveedor_nombre?: string | null;
-  pdf_original_name: string | null;
-  pdf_size: number | null;
-  extracted_json: NormalizedInvoice;
-  review_json: NormalizedInvoice;
-  warnings: unknown;
-  error_message: string | null;
-  orden_id: number | null;
-  factura_id: number | null;
-  created_at: string;
-  updated_at: string;
-  executed_at: string | null;
-  executed_by: string | null;
-  stats: {
-    total_items: number;
-    matched_items: number;
-    pending_items: number;
-  };
-  validation: {
-    can_execute: boolean;
-    issues: ImportacionValidationIssue[];
-  };
-};
-
-export type EjecutarImportacionResult = {
-  importacion_id: number;
-  orden_id: number;
-  factura_id: number;
-  items_procesados: number;
-  proveedor_creado?: boolean;
-};
-
-export type OrdenCompraListItem = {
-  id: number;
-  estado: string;
-  origen: string;
-  observaciones: string | null;
-  created_at: string;
-  recibido_at: string | null;
-  proveedor_nombre: string;
-  lineas_count: number;
-};
-
-async function apiFetchFormData<T>(path: string, form: FormData): Promise<T> {
-  const token = getToken();
-  const headers: Record<string, string> = {};
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers,
-    body: form,
-  });
-
-  const data = await res.json().catch(() => ({}));
-
-  if (res.status === 401) {
-    handleUnauthorized();
-    throw new Error((data as { message?: string }).message ?? "Sesión expirada");
-  }
-  if (!res.ok) {
-    throw new Error(
-      (data as { message?: string }).message ??
-        (data as { error?: string }).error ??
-        `Error HTTP ${res.status}`,
-    );
-  }
-  return data as T;
-}
-
-export async function uploadFacturaPdf(file: File): Promise<CompraImportacion> {
-  const form = new FormData();
-  form.append("file", file);
-  return apiFetchFormData<CompraImportacion>("/compras/importaciones", form);
-}
-
-export async function uploadFacturaTexto(input: {
-  text: string;
-  label?: string;
-}): Promise<CompraImportacion> {
-  return apiFetch<CompraImportacion>("/compras/importaciones/texto", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-}
-
-export async function createImportacionManual(): Promise<CompraImportacion> {
-  return apiFetch<CompraImportacion>("/compras/importaciones/manual", {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
-}
-
-export async function fetchImportaciones(): Promise<CompraImportacion[]> {
-  const data = await apiFetch<{ importaciones: CompraImportacion[] }>(
-    "/compras/importaciones",
-  );
-  return data.importaciones;
-}
-
-export async function fetchImportacion(id: number): Promise<CompraImportacion> {
-  return apiFetch<CompraImportacion>(`/compras/importaciones/${id}`);
-}
-
-export async function patchImportacionReview(
-  id: number,
-  review_json: NormalizedInvoice,
-): Promise<CompraImportacion> {
-  return apiFetch<CompraImportacion>(`/compras/importaciones/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify({ review_json }),
-  });
-}
-
-export async function ejecutarImportacion(
-  id: number,
-): Promise<EjecutarImportacionResult> {
-  return apiFetch<EjecutarImportacionResult>(`/compras/importaciones/${id}/ejecutar`, {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
-}
-
-export async function cancelarImportacion(id: number): Promise<CompraImportacion> {
-  return apiFetch<CompraImportacion>(`/compras/importaciones/${id}/cancelar`, {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
-}
-
-export async function fetchOrdenesCompra(): Promise<OrdenCompraListItem[]> {
-  const data = await apiFetch<{ ordenes: OrdenCompraListItem[] }>("/compras/ordenes");
-  return data.ordenes;
 }

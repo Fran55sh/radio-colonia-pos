@@ -42,8 +42,7 @@ function extractBearer(request: FastifyRequest): string | null {
 
 const ROLE_RANK: Record<PosRole, number> = {
   caja: 1,
-  compras: 2,
-  admin: 3,
+  admin: 2,
 };
 
 export function roleAtLeast(role: PosRole, minimum: PosRole): boolean {
@@ -87,7 +86,7 @@ export async function requireAuth(
   };
 }
 
-/** Exige rol mínimo (caja < compras < admin). */
+/** Exige rol mínimo (caja < admin). */
 export function requireRole(minimum: PosRole) {
   return async (request: FastifyRequest, _reply: FastifyReply) => {
     const ctx = request.authContext;

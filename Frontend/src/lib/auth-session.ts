@@ -1,18 +1,17 @@
 const STORAGE_KEY = "pos-session";
 const AUTH_REQUIRED_KEY = "pos-auth-required";
 
-export type PosRole = "caja" | "compras" | "admin";
+export type PosRole = "caja" | "admin";
 
 type StoredSession = {
   token: string;
   expires_at?: string;
-  role?: PosRole;
+  role?: PosRole | "compras";
 };
 
 const ROLE_RANK: Record<PosRole, number> = {
   caja: 1,
-  compras: 2,
-  admin: 3,
+  admin: 2,
 };
 
 function readSession(): StoredSession | null {
@@ -42,7 +41,9 @@ export function getToken(): string | null {
 export function getRole(): PosRole | null {
   if (getAuthRequired() === false) return "admin";
   const role = readSession()?.role;
-  if (role === "caja" || role === "compras" || role === "admin") return role;
+  // Sesiones antiguas con rol compras: el módulo ya no existe; equivalen a caja.
+  if (role === "compras") return "caja";
+  if (role === "caja" || role === "admin") return role;
   // Tokens antiguos sin role: asumir admin para no romper sesiones actuales
   return readSession()?.token ? "admin" : null;
 }
@@ -53,11 +54,7 @@ export function hasRoleAtLeast(minimum: PosRole): boolean {
   return ROLE_RANK[role] >= ROLE_RANK[minimum];
 }
 
-export function setToken(
-  token: string,
-  expiresAt?: string,
-  role?: PosRole,
-): void {
+export function setToken(token: string, expiresAt?: string, role?: PosRole): void {
   if (typeof window === "undefined") return;
   const payload: StoredSession = { token };
   if (expiresAt) payload.expires_at = expiresAt;

@@ -6,6 +6,7 @@ export type StockLedgerTipo =
   | "venta_web"
   | "cancelacion_web"
   | "compra_factura"
+  | "reverso_compra_factura"
   | "ajuste_manual"
   | "conteo"
   | "alta_inicial"

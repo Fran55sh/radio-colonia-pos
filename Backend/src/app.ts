@@ -1,6 +1,5 @@
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
-import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
 import { checkDbConnection } from "./config/db.js";
@@ -18,12 +17,10 @@ import { analyticsRoutes } from "./modules/analytics/routes.js";
 import { authRoutes } from "./modules/auth/routes.js";
 import { isAuthConfigured } from "./modules/auth/service.js";
 import { clientesRoutes } from "./modules/clientes/routes.js";
-import { comprasRoutes } from "./modules/compras/routes.js";
 import { contabilidadRoutes } from "./modules/contabilidad/routes.js";
 import { fiscalRoutes } from "./modules/fiscal/routes.js";
 import { cajaRoutes } from "./modules/caja/routes.js";
 import { posRoutes } from "./modules/pos/routes.js";
-import { ensurePdfStorageDir } from "./modules/compras/importacion/pdf-storage.js";
 
 const healthCache = {
   checkedAt: 0,
@@ -61,12 +58,6 @@ export async function buildApp() {
     timeWindow: "1 minute",
   });
 
-  await app.register(multipart, {
-    limits: { fileSize: 8 * 1024 * 1024, files: 1 },
-  });
-
-  await ensurePdfStorageDir();
-
   app.addHook("preHandler", requireAuth);
   app.setErrorHandler(errorHandler);
 
@@ -99,13 +90,6 @@ export async function buildApp() {
           await scoped.register(fiscalRoutes);
         },
         { prefix: "/fiscal" },
-      );
-      await api.register(
-        async (scoped) => {
-          scoped.addHook("preHandler", requireRole("compras"));
-          await scoped.register(comprasRoutes);
-        },
-        { prefix: "/compras" },
       );
       await api.register(
         async (scoped) => {
