@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { setClockForTests } from "../../lib/fecha-ar.js";
 import { setArcaConfigForTests } from "../../config/arca.js";
 import { pool } from "../../config/db.js";
 import { setArcaClientForTests } from "./arca-client.js";
@@ -176,6 +177,52 @@ describe.skipIf(!enabled)("recuperación fiscal", () => {
     expect(fake.crearFacturaCalls).toBe(1);
     expect(a?.cae).toBeTruthy();
     expect(b?.cae).toBe(a?.cae);
+  });
+
+  it("una venta mixta deja dos filas en el libro IVA", async () => {
+    await seedSku("sku-21", 100, 21);
+    await seedSku("sku-105", 100, 10.5);
+    const result = await processSale({
+      client_sale_id: "sale-mix",
+      medio_pago: "Efectivo",
+      lineas: [
+        { codigo_interno: "sku-21", cantidad: 1 },
+        { codigo_interno: "sku-105", cantidad: 1 },
+      ],
+      caja_sesion_id: cajaId,
+    });
+    expect(result.total).toBe(200);
+    const libro = await pool.query<{ alicuota: string; neto: string; iva: string; total: string }>(
+      `SELECT alicuota::float AS alicuota, neto_gravado::float AS neto, iva::float AS iva, total::float AS total
+       FROM pos_iva_registro ORDER BY alicuota`,
+    );
+    expect(libro.rows).toEqual([
+      { alicuota: 10.5, neto: 90.5, iva: 9.5, total: 100 },
+      { alicuota: 21, neto: 82.64, iva: 17.36, total: 100 },
+    ]);
+  });
+
+  it("a las 23:30 AR el libro, el comprobante y el QR usan el mismo día", async () => {
+    setClockForTests(() => new Date("2026-10-18T02:30:00.000Z"));
+    try {
+      await seedSku("sku-noche", 100);
+      const result = await vender("sale-noche", "sku-noche");
+      const libro = await pool.query<{ fecha: string }>(
+        `SELECT fecha_fiscal::text AS fecha FROM pos_iva_registro`,
+      );
+      const cbte = await pool.query<{ fecha: string }>(
+        `SELECT fecha_cbte::text AS fecha FROM pos_comprobantes_fiscales`,
+      );
+      expect(libro.rows[0].fecha.startsWith("2026-10-17")).toBe(true);
+      expect(cbte.rows[0].fecha.startsWith("2026-10-17")).toBe(true);
+      const qr = JSON.parse(
+        Buffer.from(result.fiscal!.qr_url!.split("p=")[1], "base64").toString("utf8"),
+      ) as { fecha: string };
+      expect(qr.fecha).toBe("2026-10-17");
+      expect([...fake.book.values()][0]?.cbteFch).toBe("20261017");
+    } finally {
+      setClockForTests(null);
+    }
   });
 
   it("un pool de 3 conexiones no se cuelga con 10 emisiones lentas", async () => {

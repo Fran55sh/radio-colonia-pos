@@ -9,6 +9,7 @@ import {
   type ProductoCaja,
 } from "../../lib/catalog.js";
 import { DEFAULT_IVA_ALICUOTA } from "../../lib/constants.js";
+import { hoyAR } from "../../lib/fecha-ar.js";
 import { calcularImportesVenta, centsToDecimal, moneyFromCents } from "../../lib/fiscal-importes.js";
 import { resolveEffectiveTiers } from "../../lib/qty-discount-scope.js";
 import { resolveUnitPrice, type PriceTier } from "../../lib/quantity-pricing.js";
@@ -236,13 +237,24 @@ async function registerSaleInTransaction(
     });
   }
 
-  await client.query(
-    `INSERT INTO pos_iva_registro (
-      tipo, referencia_tipo, referencia_id, fecha_fiscal,
-      alicuota, neto_gravado, iva, exento, total
-    ) VALUES ('venta', 'pos_venta', $1, CURRENT_DATE, $2, $3, $4, $5, $6)`,
-    [ventaId, DEFAULT_IVA_ALICUOTA, netoTotal, ivaTotal, exentoTotal, totalVenta],
-  );
+  const fechaFiscal = hoyAR();
+  for (const grupo of importes.grupos) {
+    await client.query(
+      `INSERT INTO pos_iva_registro (
+        tipo, referencia_tipo, referencia_id, fecha_fiscal,
+        alicuota, neto_gravado, iva, exento, total
+      ) VALUES ('venta', 'pos_venta', $1, $2::date, $3, $4, $5, $6, $7)`,
+      [
+        ventaId,
+        fechaFiscal,
+        grupo.alicuota,
+        centsToDecimal(grupo.neto_cents),
+        centsToDecimal(grupo.iva_cents),
+        centsToDecimal(grupo.exento_cents),
+        centsToDecimal(grupo.total_cents),
+      ],
+    );
+  }
 
   return { ventaId, totalVenta };
 }
