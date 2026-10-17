@@ -175,16 +175,24 @@ El módulo fiscal del POS **ya está implementado**. Homologación y go-live son
 | `ARCA_CUIT` / `ARCA_PTO_VTA` | CUIT emisor y punto de venta. |
 | `ARCA_CERT` / `ARCA_KEY` | PEM inline (recomendado en Coolify). |
 | `ARCA_CERT_PATH` / `ARCA_KEY_PATH` | Rutas a PEM (local / volume `./certs`). |
+| `ARCA_REQUEST_TIMEOUT_MS` | Timeout de cada intento SOAP. Default 10000. |
+| `ARCA_RETRIES` | Reintentos del SDK ante timeout, red o HTTP 5xx. Default 1. |
+| `DB_CONNECTION_TIMEOUT_MS` | Espera para obtener una conexión del pool. Default 5000. |
+| `FISCAL_EMISION_BUDGET_MS` | Tope de la emisión dentro de `POST /pos/ventas`. Default 25000. |
+| `FISCAL_LOCK_TIMEOUT_MS` | `lock_timeout` de los advisory locks fiscales. Default 20000. |
+| `FISCAL_CONCILIACION_INTERVAL_MS` | Barrido de comprobantes `enviando`/`desconocido`. Default 300000. |
 
 Homologación: `ARCA_ENABLED=true` + `ARCA_PRODUCTION=false` + certs homo.
 
-Producción: `ARCA_ENABLED=true` + `ARCA_PRODUCTION=true` + certs prod.
+Producción: recién después del checklist de homologación, `ARCA_ENABLED=true` + `ARCA_PRODUCTION=true` + certs de producción.
 
 Emergencia: solo `ARCA_ENABLED=false`.
 
 ### Schema DB
 
-`pos_comprobantes_fiscales` y columnas fiscales de clientes vienen de la migración del ecommerce (`0008_*fiscal*`). El POS no crea tablas; al arrancar verifica schema.
+El POS no crea tablas. Antes de desplegar esta versión hay que aplicar en el ecommerce `app/src/db/migrations/0031_pos_fiscal_intentos.sql` y dejarla correr dos veces sin error. Si falta, el POS aborta el arranque pidiendo la 0031.
+
+Orden: migración 0031 desplegada → POS. No invertir.
 
 Checklist:
 
