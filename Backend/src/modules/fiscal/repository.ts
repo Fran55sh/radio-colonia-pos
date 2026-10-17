@@ -318,9 +318,9 @@ export async function marcarComprobanteEmitido(
         row.cbte_nro,
       );
       await client.query(
-        `UPDATE pos_iva_registro SET comprobante = $2
+        `UPDATE pos_iva_registro SET comprobante = $2, fecha_fiscal = $3::date
          WHERE referencia_tipo = 'pos_venta' AND referencia_id = $1`,
-        [ventaId, comprobanteStr],
+        [ventaId, comprobanteStr, data.fecha_cbte],
       );
     }
   };

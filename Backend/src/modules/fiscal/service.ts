@@ -24,9 +24,7 @@ import { conciliarComprobante } from "./conciliacion.js";
 import { ArcaAuthError, ArcaSoapError } from "@ramiidv/arca-facturacion";
 import type { ComprobanteFiscalResponse } from "./types.js";
 
-function fechaHoyAR(now = new Date()): string {
-  return now.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-}
+import { hoyAR, toCbteFch } from "../../lib/fecha-ar.js";
 
 function formatArcaDate(value: string): string {
   if (value.includes("-")) return value.slice(0, 10);
@@ -159,10 +157,10 @@ async function ejecutarEmision(
     return await marcarFallaPrevia(ventaId, err, db);
   }
 
-  const fechaCbte = fechaHoyAR();
+  const fechaCbte = hoyAR();
   const detail = buildFECAEDetRequest({
     cbteNro: 0,
-    cbteFch: fechaCbte.replace(/-/g, ""),
+    cbteFch: toCbteFch(),
     docTipo: resuelto.docTipo,
     docNro: resuelto.docNro,
     condicionIva: resuelto.condicionIva,
