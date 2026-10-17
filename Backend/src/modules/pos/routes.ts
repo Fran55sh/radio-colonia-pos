@@ -19,7 +19,7 @@ export async function posRoutes(app: FastifyInstance) {
     const result = await processSale(body, {
       authContext: request.authContext,
     });
-    return reply.status(201).send(result);
+    return reply.status(result.duplicada ? 200 : 201).send(result);
   });
 
   app.post("/ventas/offline-batch", async (request, reply) => {

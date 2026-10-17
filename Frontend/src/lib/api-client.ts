@@ -72,7 +72,24 @@ export type CreateSaleResult = {
   client_sale_id?: string;
   fiscal?: FiscalResult | null;
   caja_movimiento_id?: number;
+  duplicada?: boolean;
 };
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly details?: unknown;
+
+  constructor(status: number, code: string, message: string, details?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+const VENTA_TIMEOUT_MS = Number(import.meta.env.VITE_VENTA_TIMEOUT_MS) || 45_000;
 
 export type OfflineBatchResult = {
   procesadas: number;
@@ -104,7 +121,7 @@ function handleUnauthorized(): void {
 async function apiFetch<T>(
   path: string,
   init?: RequestInit,
-  opts?: { skipAuthRedirect?: boolean },
+  opts?: { skipAuthRedirect?: boolean; timeoutMs?: number },
 ): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -117,35 +134,60 @@ async function apiFetch<T>(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers,
-  });
+  const controller = new AbortController();
+  const timer =
+    opts?.timeoutMs != null ? setTimeout(() => controller.abort(), opts.timeoutMs) : undefined;
 
-  const data = await res.json().catch(() => ({}));
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers,
+      signal: init?.signal ?? controller.signal,
+    });
 
-  if (res.status === 401) {
-    if (!opts?.skipAuthRedirect) {
-      handleUnauthorized();
+    const data = await res.json().catch(() => ({}));
+    const body = data as { message?: string; error?: string; details?: unknown };
+
+    if (res.status === 401) {
+      if (!opts?.skipAuthRedirect) {
+        handleUnauthorized();
+      }
+      throw new ApiError(
+        401,
+        body.error ?? "UNAUTHORIZED",
+        body.message ?? "Sesión expirada o no autorizada",
+        body.details,
+      );
     }
-    const message = (data as { message?: string }).message ?? "Sesión expirada o no autorizada";
-    throw new Error(message);
-  }
 
-  if (res.status === 403) {
-    const message = (data as { message?: string }).message ?? "No tenés permiso para esta acción";
-    throw new Error(message);
-  }
+    if (res.status === 403) {
+      throw new ApiError(
+        403,
+        body.error ?? "FORBIDDEN",
+        body.message ?? "No tenés permiso para esta acción",
+        body.details,
+      );
+    }
 
-  if (!res.ok) {
-    const message =
-      (data as { message?: string }).message ??
-      (data as { error?: string }).error ??
-      `Error HTTP ${res.status}`;
-    throw new Error(message);
-  }
+    if (!res.ok) {
+      throw new ApiError(
+        res.status,
+        body.error ?? "HTTP_ERROR",
+        body.message ?? body.error ?? `Error HTTP ${res.status}`,
+        body.details,
+      );
+    }
 
-  return data as T;
+    return data as T;
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new ApiError(0, "TIMEOUT", "La solicitud tardó demasiado");
+    }
+    throw new ApiError(0, "NETWORK", err instanceof Error ? err.message : "Error de red");
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function fetchAuthConfig(): Promise<{ auth_required: boolean }> {
@@ -212,10 +254,14 @@ export async function createCliente(payload: CreateClientePayload): Promise<Clie
 }
 
 export async function createVenta(payload: CreateSalePayload): Promise<CreateSaleResult> {
-  return apiFetch<CreateSaleResult>("/pos/ventas", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return apiFetch<CreateSaleResult>(
+    "/pos/ventas",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    { timeoutMs: VENTA_TIMEOUT_MS },
+  );
 }
 
 export async function retryFiscal(ventaId: number): Promise<{ fiscal: FiscalResult | null }> {

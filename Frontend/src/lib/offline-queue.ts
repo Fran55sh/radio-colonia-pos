@@ -58,6 +58,54 @@ export function generateClientSaleId(): string {
   return `offline-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+const PENDING_SALE_KEY = "pos-pending-sale";
+
+export type PendingSale = {
+  client_sale_id: string;
+  payload: CreateSalePayload & { client_sale_id: string };
+  cart_fingerprint: string;
+  created_at: string;
+  allow_discard: boolean;
+};
+
+export function cartFingerprint(input: {
+  lineas: Array<{ codigo_interno: string; cantidad: number; precio_unitario?: number }>;
+  cliente_id?: number;
+  medio_pago: string;
+  caja_sesion_id?: number;
+}): string {
+  const lines = input.lineas
+    .map(
+      (line) =>
+        `${line.codigo_interno.toLowerCase()}:${line.cantidad}:${line.precio_unitario ?? ""}`,
+    )
+    .sort()
+    .join("|");
+  return `${lines}#${input.cliente_id ?? ""}#${input.medio_pago}#${input.caja_sesion_id ?? ""}`;
+}
+
+export function loadPendingSale(): PendingSale | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(PENDING_SALE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PendingSale;
+    if (!parsed?.client_sale_id || !parsed.payload) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function savePendingSale(sale: PendingSale): void {
+  localStorage.setItem(PENDING_SALE_KEY, JSON.stringify(sale));
+}
+
+export function clearPendingSale(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(PENDING_SALE_KEY);
+}
+
 /**
  * Detecta líneas que superan el stock conocido del catálogo.
  * Solo informativo: el POS permite vender sin stock (online y offline).
