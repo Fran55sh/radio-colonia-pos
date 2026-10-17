@@ -7,6 +7,7 @@ export const pool = new Pool({
   connectionString: env.DATABASE_URL,
   max: 20,
   idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: env.DB_CONNECTION_TIMEOUT_MS,
 });
 
 export type DbClient = pg.PoolClient;

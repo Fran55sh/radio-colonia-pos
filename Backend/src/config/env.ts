@@ -86,6 +86,18 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+  /** Timeout SOAP de cada intento ARCA. Default 10 s (D3). */
+  ARCA_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  /** Reintentos del SDK ante timeout, red o HTTP 5xx. Default 1 (D3). */
+  ARCA_RETRIES: z.coerce.number().int().min(0).default(1),
+  /** Espera máxima para conseguir una conexión del pool. Default 5 s (D3). */
+  DB_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
+  /** Presupuesto de la emisión dentro de POST /pos/ventas. Default 25 s (D3). */
+  FISCAL_EMISION_BUDGET_MS: z.coerce.number().int().positive().default(25_000),
+  /** lock_timeout de los advisory locks fiscales. Default 20 s (D3). */
+  FISCAL_LOCK_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
+  /** Barrido de comprobantes enviando/desconocido. Default 5 min (D4). */
+  FISCAL_CONCILIACION_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
 });
 
 const databaseUrl = resolveDatabaseUrl();
@@ -105,6 +117,12 @@ export const env = envSchema.parse({
   POS_SESSION_HOURS: process.env.POS_SESSION_HOURS,
   POS_CAJA_REQUIRE_SESSION: process.env.POS_CAJA_REQUIRE_SESSION,
   POS_STOCK_LEDGER_ENABLED: process.env.POS_STOCK_LEDGER_ENABLED,
+  ARCA_REQUEST_TIMEOUT_MS: process.env.ARCA_REQUEST_TIMEOUT_MS,
+  ARCA_RETRIES: process.env.ARCA_RETRIES,
+  DB_CONNECTION_TIMEOUT_MS: process.env.DB_CONNECTION_TIMEOUT_MS,
+  FISCAL_EMISION_BUDGET_MS: process.env.FISCAL_EMISION_BUDGET_MS,
+  FISCAL_LOCK_TIMEOUT_MS: process.env.FISCAL_LOCK_TIMEOUT_MS,
+  FISCAL_CONCILIACION_INTERVAL_MS: process.env.FISCAL_CONCILIACION_INTERVAL_MS,
 });
 
 if (env.NODE_ENV === "production") {

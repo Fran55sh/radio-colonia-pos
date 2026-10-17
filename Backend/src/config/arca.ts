@@ -182,7 +182,20 @@ export type ArcaConfig = {
   ambiente: "dev" | "prod";
 };
 
+let testConfig: ArcaConfig | null | undefined;
+
+/** Permite emitir en tests sin certificados. `null` simula ARCA apagado. */
+export function setArcaConfigForTests(config: ArcaConfig | null): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("setArcaConfigForTests solo se usa con NODE_ENV=test");
+  }
+  testConfig = config;
+  cachedParsed = null;
+}
+
 export function getArcaConfig(): ArcaConfig | null {
+  if (testConfig !== undefined) return testConfig;
+
   const parsed = parseArcaEnv();
   if (!parsed.ARCA_ENABLED) return null;
 

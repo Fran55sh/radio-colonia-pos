@@ -12,6 +12,7 @@
     "arca:check:dev": "tsx scripts/arca-wsaa-check.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "postinstall": "patch-package && node scripts/ensure-arca-common-patch.mjs"
   },
   "dependencies": {
