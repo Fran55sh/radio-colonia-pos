@@ -244,3 +244,143 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_pos_caja_movimientos_sale_activo
 
 ALTER TABLE pos_ventas
   ADD COLUMN IF NOT EXISTS caja_sesion_id INTEGER REFERENCES pos_caja_sesiones (id);
+
+-- Incluye 0031_pos_fiscal_intentos.sql
+
+-- 0031: intentos fiscales del POS. Idempotente: el migrador re-ejecuta todos los SQL.
+
+DO $$
+DECLARE
+  rec record;
+  has_enviando boolean := false;
+BEGIN
+  FOR rec IN
+    SELECT c.conname, pg_get_constraintdef(c.oid) AS def
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = 'public'
+      AND t.relname = 'pos_comprobantes_fiscales'
+      AND c.contype = 'c'
+      AND pg_get_constraintdef(c.oid) ILIKE '%estado%'
+  LOOP
+    IF rec.def ILIKE '%enviando%' THEN
+      has_enviando := true;
+    END IF;
+  END LOOP;
+
+  IF NOT has_enviando THEN
+    FOR rec IN
+      SELECT c.conname
+      FROM pg_constraint c
+      JOIN pg_class t ON t.oid = c.conrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+      WHERE n.nspname = 'public'
+        AND t.relname = 'pos_comprobantes_fiscales'
+        AND c.contype = 'c'
+        AND pg_get_constraintdef(c.oid) ILIKE '%estado%'
+    LOOP
+      EXECUTE format('ALTER TABLE pos_comprobantes_fiscales DROP CONSTRAINT %I', rec.conname);
+    END LOOP;
+
+    ALTER TABLE pos_comprobantes_fiscales
+      ADD CONSTRAINT pos_comprobantes_fiscales_estado_check
+      CHECK (estado IN (
+        'pendiente', 'enviando', 'desconocido', 'emitido', 'rechazado', 'error', 'anulado'
+      ));
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS pos_comprobantes_fiscales_intentos (
+  id                          SERIAL PRIMARY KEY,
+  comprobante_id              INTEGER NOT NULL REFERENCES pos_comprobantes_fiscales (id) ON DELETE CASCADE,
+  venta_id                    INTEGER NOT NULL,
+  nro_intento                 INTEGER NOT NULL,
+  estado                      VARCHAR(16) NOT NULL
+                              CHECK (estado IN (
+                                'enviando', 'emitido', 'rechazado', 'desconocido', 'no_autorizado', 'error'
+                              )),
+  ambiente                    VARCHAR(8) NOT NULL,
+  emisor_cuit                 VARCHAR(11) NOT NULL,
+  punto_venta                 INTEGER NOT NULL,
+  cbte_tipo                   INTEGER NOT NULL,
+  cbte_nro                    INTEGER,
+  fecha_cbte                  DATE,
+  doc_tipo                    INTEGER,
+  doc_nro                     BIGINT,
+  condicion_iva_receptor_id   INTEGER,
+  imp_total                   NUMERIC(14, 2),
+  imp_neto                    NUMERIC(14, 2),
+  imp_iva                     NUMERIC(14, 2),
+  imp_op_ex                   NUMERIC(14, 2),
+  iva_detalle                 JSONB,
+  request_payload             JSONB,
+  response_raw                JSONB,
+  cae                         VARCHAR(20),
+  cae_vencimiento             DATE,
+  error_code                  VARCHAR(32),
+  error_message               TEXT,
+  created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  sent_at                     TIMESTAMPTZ,
+  resolved_at                 TIMESTAMPTZ,
+  UNIQUE (comprobante_id, nro_intento)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pos_fiscal_intentos_numero
+  ON pos_comprobantes_fiscales_intentos (ambiente, punto_venta, cbte_tipo, cbte_nro)
+  WHERE cbte_nro IS NOT NULL AND estado IN ('enviando', 'desconocido', 'emitido');
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pos_fiscal_intentos_abierto
+  ON pos_comprobantes_fiscales_intentos (comprobante_id)
+  WHERE estado IN ('enviando', 'desconocido');
+
+CREATE INDEX IF NOT EXISTS idx_pos_fiscal_intentos_barrido
+  ON pos_comprobantes_fiscales_intentos (estado, created_at);
+
+ALTER TABLE pos_comprobantes_fiscales
+  ADD COLUMN IF NOT EXISTS intento_actual_id INTEGER,
+  ADD COLUMN IF NOT EXISTS iva_detalle JSONB,
+  ADD COLUMN IF NOT EXISTS imp_total_enviado NUMERIC(14, 2);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'pos_comprobantes_fiscales_intento_actual_id_fkey'
+  ) THEN
+    ALTER TABLE pos_comprobantes_fiscales
+      ADD CONSTRAINT pos_comprobantes_fiscales_intento_actual_id_fkey
+      FOREIGN KEY (intento_actual_id)
+      REFERENCES pos_comprobantes_fiscales_intentos (id)
+      ON DELETE SET NULL;
+  END IF;
+END $$;
+
+UPDATE pos_comprobantes_fiscales
+SET estado = 'emitido',
+    updated_at = NOW()
+WHERE cae IS NOT NULL
+  AND estado <> 'emitido';
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_indexes WHERE indexname = 'uq_pos_iva_registro_venta_alicuota'
+  ) THEN
+    RETURN;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pos_iva_registro
+    WHERE tipo = 'venta'
+    GROUP BY referencia_tipo, referencia_id, alicuota
+    HAVING COUNT(*) > 1
+  ) THEN
+    RAISE NOTICE 'pos_iva_registro tiene duplicados de venta; no se crea el índice único';
+    RETURN;
+  END IF;
+
+  CREATE UNIQUE INDEX uq_pos_iva_registro_venta_alicuota
+    ON pos_iva_registro (referencia_tipo, referencia_id, alicuota)
+    WHERE tipo = 'venta';
+END $$;

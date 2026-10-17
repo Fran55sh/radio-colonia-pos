@@ -349,6 +349,10 @@ function fiscalPorFalloPosterior(err: unknown): ComprobanteFiscalResponse {
     qr_url: null,
     error_message: message,
     ambiente: "",
+    puede_reintentar: true,
+    requiere_conciliacion: false,
+    imp_total_enviado: null,
+    intento: null,
   };
 }
 

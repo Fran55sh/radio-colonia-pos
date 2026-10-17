@@ -38,7 +38,7 @@ export type CreateClientePayload = {
 };
 
 export type FiscalResult = {
-  estado: "pendiente" | "emitido" | "error" | "anulado";
+  estado: "pendiente" | "enviando" | "desconocido" | "emitido" | "rechazado" | "error" | "anulado";
   comprobante: string | null;
   cbte_tipo: number;
   cbte_tipo_label: string;
@@ -49,6 +49,9 @@ export type FiscalResult = {
   qr_url: string | null;
   error_message: string | null;
   ambiente: string;
+  puede_reintentar?: boolean;
+  requiere_conciliacion?: boolean;
+  imp_total_enviado?: number | null;
 };
 
 export type SaleLine = {
@@ -269,6 +272,10 @@ export async function retryFiscal(ventaId: number): Promise<{ fiscal: FiscalResu
     method: "POST",
     body: JSON.stringify({}),
   });
+}
+
+export async function fetchFiscalPendientes(): Promise<{ pendientes: Array<FiscalResult & { venta_id: number }> }> {
+  return apiFetch(`/fiscal/pendientes`);
 }
 
 export async function syncOfflineVentas(ventas: CreateSalePayload[]): Promise<OfflineBatchResult> {

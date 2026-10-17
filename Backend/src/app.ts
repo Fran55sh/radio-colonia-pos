@@ -132,6 +132,8 @@ export async function startServer() {
     console.log("[POS] Auth por PIN habilitada");
   }
   warnIfArcaEnabledButIncomplete();
+  const { startConciliacionSweep } = await import("./modules/fiscal/conciliacion.js");
+  startConciliacionSweep();
   const app = await buildApp();
   await app.listen({ port: env.PORT, host: env.HOST });
   return app;

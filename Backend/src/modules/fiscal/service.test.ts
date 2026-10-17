@@ -255,6 +255,7 @@ describe("emitirComprobanteVenta idempotency", () => {
       "IMPORTES_INCONSISTENTES",
       expect.any(String),
       expect.any(Error),
+      undefined,
     );
   });
 
@@ -262,6 +263,7 @@ describe("emitirComprobanteVenta idempotency", () => {
     getComprobanteByVentaId.mockResolvedValue({ estado: "pendiente", cae: null, ambiente: "dev" });
     ensureComprobantePendiente.mockResolvedValue({ estado: "pendiente" });
     marcarComprobanteEmitido.mockRejectedValue(new Error("db caida"));
+    rowToFiscalResponse.mockImplementation((row: { estado?: string }) => row);
     const crearFactura = vi.fn().mockResolvedValue(caeResponse("777", 4));
     getArcaClient.mockReturnValue({
       crearFactura,
@@ -272,7 +274,8 @@ describe("emitirComprobanteVenta idempotency", () => {
     expect(crearFactura).toHaveBeenCalledOnce();
     expect(marcarComprobanteEmitido).toHaveBeenCalledTimes(3);
     expect(marcarComprobanteError).not.toHaveBeenCalled();
-    expect(result).toMatchObject({ estado: "emitido", cae: "777" });
+    expect(result?.estado).not.toBe("error");
+    expect(result?.cae ?? null).toBeNull();
   });
 
   it("maybeEmitirDespuesDeVenta skips when skipFiscal", async () => {

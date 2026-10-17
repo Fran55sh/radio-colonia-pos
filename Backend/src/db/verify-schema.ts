@@ -78,6 +78,16 @@ export async function assertRequiredSchema(): Promise<void> {
     );
   }
 
+  if (!(await columnExists("pos_comprobantes_fiscales", "intento_actual_id"))
+    || !(await columnExists("pos_comprobantes_fiscales", "iva_detalle"))
+    || !(await columnExists("pos_comprobantes_fiscales", "imp_total_enviado"))
+    || !(await tableExists("pos_comprobantes_fiscales_intentos"))) {
+    throw new Error(
+      "Falta la migración ecommerce 0031 (pos_comprobantes_fiscales_intentos). " +
+        "Desplegá RadioColonia con 0031_pos_fiscal_intentos.sql antes de esta versión del POS.",
+    );
+  }
+
   if (!(await columnExists("pos_ordenes_compra_lineas", "costo_unitario_neto"))) {
     throw new Error(
       "Falta columna requerida: pos_ordenes_compra_lineas.costo_unitario_neto. " +
