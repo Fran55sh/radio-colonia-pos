@@ -34,6 +34,7 @@ export type SaleResult = {
   client_sale_id?: string;
   fiscal?: ComprobanteFiscalResponse | null;
   caja_movimiento_id?: number;
+  duplicada?: boolean;
 };
 
 type LineaDetalle = {
@@ -303,6 +304,23 @@ async function assertImportesSiArca(input: CreateSaleInput): Promise<void> {
   }
 }
 
+const FISCAL_VENTA_LOCK = 8421001;
+
+async function ventaLockLibre(ventaId: number): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query<{ locked: boolean }>(
+      `SELECT pg_try_advisory_lock($1, $2) AS locked`,
+      [FISCAL_VENTA_LOCK, ventaId],
+    );
+    if (!rows[0]?.locked) return false;
+    await client.query(`SELECT pg_advisory_unlock($1, $2)`, [FISCAL_VENTA_LOCK, ventaId]);
+    return true;
+  } finally {
+    client.release();
+  }
+}
+
 function fiscalPorFalloPosterior(err: unknown): ComprobanteFiscalResponse {
   const message = err instanceof Error ? err.message : "Error posterior al registro de la venta";
   return {
@@ -380,13 +398,18 @@ export async function processSale(
         cajaMovimientoId = ensured.row.id;
       }
       const yaEmitido = await getFiscalStatus(existing.id);
-      const fiscal = yaEmitido ?? (await emitirSeguro(existing.id));
-      throw new AppError(409, "DUPLICATE_OFFLINE_SALE", "Venta ya registrada", {
+      const lockLibre = !yaEmitido || (yaEmitido.estado === "pendiente" && !yaEmitido.cae);
+      const fiscal = lockLibre && (await ventaLockLibre(existing.id))
+        ? await emitirSeguro(existing.id)
+        : yaEmitido;
+      return {
         venta_id: existing.id,
         total: existing.total,
+        client_sale_id: input.client_sale_id,
         fiscal,
         caja_movimiento_id: cajaMovimientoId,
-      });
+        duplicada: true,
+      };
     }
   }
 
@@ -490,9 +513,14 @@ export async function processOfflineBatch(
         },
         { skipFiscal: true, authContext },
       );
-      procesadas++;
+      if (result.duplicada) duplicadas++;
+      else procesadas++;
+
+      let fiscal = result.fiscal ?? null;
+      if (!result.duplicada) {
+        fiscal = await maybeEmitirDespuesDeVenta(result.venta_id);
+      }
       if (venta.client_sale_id) {
-        const fiscal = await maybeEmitirDespuesDeVenta(result.venta_id);
         resultados.push({
           client_sale_id: venta.client_sale_id,
           venta_id: result.venta_id,
@@ -501,27 +529,6 @@ export async function processOfflineBatch(
         });
       }
     } catch (err) {
-      if (err instanceof AppError && err.code === "DUPLICATE_OFFLINE_SALE") {
-        duplicadas++;
-        const details = err.details as {
-          venta_id: number;
-          total?: number;
-          fiscal?: ComprobanteFiscalResponse | null;
-        };
-        if (venta.client_sale_id) {
-          let fiscal = details.fiscal ?? null;
-          if (!fiscal) {
-            fiscal = await maybeEmitirDespuesDeVenta(details.venta_id);
-          }
-          resultados.push({
-            client_sale_id: venta.client_sale_id,
-            venta_id: details.venta_id,
-            total: details.total ?? 0,
-            fiscal,
-          });
-        }
-        continue;
-      }
       errores.push({
         client_sale_id: venta.client_sale_id ?? "unknown",
         error: err instanceof Error ? err.message : "Error desconocido",

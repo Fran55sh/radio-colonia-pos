@@ -11,6 +11,7 @@ import { FiscalResultDialog } from "@/components/pos/FiscalResultDialog";
 import { OpenRegisterDialog } from "@/components/pos/OpenRegisterDialog";
 import { PosClock } from "@/components/pos/PosClock";
 import {
+  ApiError,
   checkApiConnection,
   createCliente,
   createVenta,
@@ -30,11 +31,16 @@ import {
 import { formatARS } from "@/lib/format-money";
 import { resolveUnitPrice, priceRange } from "@/lib/quantity-pricing";
 import {
+  cartFingerprint,
   clearOfflineQueue,
+  clearPendingSale,
   enqueueSale,
   generateClientSaleId,
   loadOfflineQueue,
+  loadPendingSale,
   removeFromQueue,
+  savePendingSale,
+  type PendingSale,
 } from "@/lib/offline-queue";
 import { useCashSession } from "@/hooks/useCashSession";
 import {
@@ -124,6 +130,7 @@ function POS() {
   const [lastFiscal, setLastFiscal] = useState<FiscalResult | null>(null);
   const [lastVentaId, setLastVentaId] = useState(0);
   const [lastSaleTotal, setLastSaleTotal] = useState(0);
+  const [pendingSale, setPendingSale] = useState<PendingSale | null>(null);
   const [mobileStep, setMobileStep] = useState<MobileStep>("precios");
   const [menuOpen, setMenuOpen] = useState(false);
   const [isLg, setIsLg] = useState(() =>
@@ -185,6 +192,7 @@ function POS() {
 
   useEffect(() => {
     setPendingOffline(loadOfflineQueue().length);
+    setPendingSale(loadPendingSale());
   }, []);
 
   const checkConnection = useCallback(async () => {
@@ -222,6 +230,11 @@ function POS() {
       const syncedIds = result.resultados.map((r) => r.client_sale_id);
       removeFromQueue(syncedIds);
       setPendingOffline(loadOfflineQueue().length);
+      const pending = loadPendingSale();
+      if (pending && syncedIds.includes(pending.client_sale_id)) {
+        clearPendingSale();
+        setPendingSale(null);
+      }
       if (result.procesadas > 0) {
         flash(`${result.procesadas} venta(s) offline sincronizada(s)`);
         void queryClient.invalidateQueries({ queryKey: ["pos-productos"] });
@@ -427,7 +440,6 @@ function POS() {
         return;
       }
       if (processing) return;
-      setProcessing(true);
 
       const saleTotal = cart.reduce((s, i) => s + i.qty * i.precio_venta, 0);
       const lineas = cart.map((i) => ({
@@ -435,14 +447,31 @@ function POS() {
         cantidad: i.qty,
         precio_unitario: i.precio_venta,
       }));
-      const clientSaleId = generateClientSaleId();
-      const payload = {
-        client_sale_id: clientSaleId,
+      const draft = {
         cliente_id: selectedCliente?.id,
         medio_pago: method,
         lineas,
         caja_sesion_id: cash.sesionId,
       };
+      const fingerprint = cartFingerprint(draft);
+      const stored = loadPendingSale();
+      if (stored && stored.cart_fingerprint !== fingerprint) {
+        setPendingSale(stored);
+        flash("Hay una venta anterior sin confirmar. Verificá o descartá antes de cobrar otra.");
+        return;
+      }
+      const clientSaleId = stored?.client_sale_id ?? generateClientSaleId();
+      const pending: PendingSale = stored ?? {
+        client_sale_id: clientSaleId,
+        payload: { ...draft, client_sale_id: clientSaleId },
+        cart_fingerprint: fingerprint,
+        created_at: new Date().toISOString(),
+        allow_discard: false,
+      };
+      savePendingSale(pending);
+      setPendingSale(pending);
+      const payload = pending.payload;
+      setProcessing(true);
 
       const warnOfflineStock = () => {
         for (const item of cart) {
@@ -502,12 +531,16 @@ function POS() {
       try {
         if (!online) {
           if (!tryEnqueueOffline()) return;
+          clearPendingSale();
+          setPendingSale(null);
           flash(`Venta guardada offline: ${method} — ${formatARS(saleTotal)}`);
           resetAfterSale();
           return;
         }
 
         const result = await createVenta(payload);
+        clearPendingSale();
+        setPendingSale(null);
         flash(`Venta #${result.venta_id}: ${method} — ${formatARS(result.total)}`);
         if (result.fiscal) {
           setLastFiscal(result.fiscal);
@@ -515,19 +548,21 @@ function POS() {
           setLastSaleTotal(result.total);
           setFiscalDialogOpen(true);
         }
-        patchCatalogStock();
+        if (!result.duplicada) patchCatalogStock();
         resetAfterSale();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Error al registrar venta";
-        if (msg.toLowerCase().includes("stock")) {
-          flash(msg);
-          void refetch();
-        } else if (!online || msg.includes("fetch")) {
+        if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+          const rejected = { ...pending, allow_discard: true };
+          savePendingSale(rejected);
+          setPendingSale(rejected);
+          flash(err.message);
+          if (err.message.toLowerCase().includes("stock")) void refetch();
+          return;
+        }
+        flash("No sabemos si la venta se registró. Tocá Verificar.");
+        if (!online) {
           if (!tryEnqueueOffline()) return;
           flash(`Venta en cola offline: ${method}`);
-          resetAfterSale();
-        } else {
-          flash(msg);
         }
       } finally {
         setProcessing(false);
@@ -548,6 +583,56 @@ function POS() {
       cash.setOpenDialog,
     ],
   );
+
+  const verificarPending = useCallback(async () => {
+    const pending = loadPendingSale();
+    if (!pending || processing) return;
+    setProcessing(true);
+    try {
+      const result = await createVenta(pending.payload);
+      clearPendingSale();
+      setPendingSale(null);
+      flash(`Venta #${result.venta_id} confirmada — ${formatARS(result.total)}`);
+      if (result.fiscal) {
+        setLastFiscal(result.fiscal);
+        setLastVentaId(result.venta_id);
+        setLastSaleTotal(result.total);
+        setFiscalDialogOpen(true);
+      }
+      if (!result.duplicada) {
+        queryClient.setQueryData<ProductoCaja[]>(["pos-productos"], (prev) => {
+          if (!prev) return prev;
+          const qtyBySku = new Map(
+            pending.payload.lineas.map((line) => [line.codigo_interno.toLowerCase(), line.cantidad]),
+          );
+          return prev.map((product) => {
+            const sold = qtyBySku.get(product.codigo_interno.toLowerCase());
+            if (!sold) return product;
+            return { ...product, stock: product.stock - sold };
+          });
+        });
+      }
+      resetAfterSale();
+    } catch (err) {
+      if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+        const rejected = { ...pending, allow_discard: true };
+        savePendingSale(rejected);
+        setPendingSale(rejected);
+        flash(err.message);
+        return;
+      }
+      flash("No sabemos si la venta se registró. Tocá Verificar.");
+    } finally {
+      setProcessing(false);
+    }
+  }, [flash, processing, queryClient, resetAfterSale]);
+
+  const descartarPending = useCallback(() => {
+    const pending = loadPendingSale();
+    if (!pending?.allow_discard) return;
+    clearPendingSale();
+    setPendingSale(null);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -795,6 +880,31 @@ function POS() {
           </Sheet>
         </div>
       </header>
+
+      {pendingSale && (
+        <div
+          role="status"
+          className="shrink-0 flex flex-wrap items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
+        >
+          <span>Hay una venta anterior sin confirmar</span>
+          <button
+            type="button"
+            className="rounded border border-amber-200/40 px-2 py-1 font-semibold"
+            disabled={processing}
+            onClick={() => void verificarPending()}
+          >
+            Verificar
+          </button>
+          <button
+            type="button"
+            className="rounded border border-amber-200/40 px-2 py-1 font-semibold disabled:opacity-40"
+            disabled={!pendingSale.allow_discard || processing}
+            onClick={descartarPending}
+          >
+            Descartar
+          </button>
+        </div>
+      )}
 
       {isError && (
         <div className="px-4 sm:px-5 py-2 bg-offline/10 text-offline text-xs border-b border-offline/30">

@@ -2,11 +2,10 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setArcaConfigForTests } from "../../config/arca.js";
 import { pool } from "../../config/db.js";
-import { AppError } from "../../middleware/errors.js";
 import { marcarComprobanteError } from "../fiscal/repository.js";
 import { setArcaClientForTests } from "../fiscal/arca-client.js";
 import { FakeArca } from "../fiscal/fake-arca.js";
-import { processSale, setPostCommitFaultForTests } from "./service.js";
+import { processOfflineBatch, processSale, setPostCommitFaultForTests } from "./service.js";
 import { applyPosSchema, closePool } from "../../../test/apply-pos-schema.js";
 
 const enabled = Boolean(process.env.TEST_DATABASE_URL);
@@ -163,17 +162,66 @@ describe.skipIf(!enabled)("guardas fiscales de la venta", () => {
       [first.venta_id],
     );
     fake.reset();
-    await expect(
-      processSale({
-        client_sale_id: "sale-replay",
-        medio_pago: "Efectivo",
-        lineas: [{ codigo_interno: "sku-replay", cantidad: 1 }],
-        caja_sesion_id: cajaId,
-      }),
-    ).rejects.toBeInstanceOf(AppError);
+    const replay = await processSale({
+      client_sale_id: "sale-replay",
+      medio_pago: "Efectivo",
+      lineas: [{ codigo_interno: "sku-replay", cantidad: 1 }],
+      caja_sesion_id: cajaId,
+    });
+    expect(replay.duplicada).toBe(true);
+    expect(replay.venta_id).toBe(first.venta_id);
     expect(fake.facturarCalls).toBe(0);
     expect(fake.crearFacturaCalls).toBe(0);
     const ventas = await pool.query(`SELECT id FROM pos_ventas`);
     expect(ventas.rowCount).toBe(1);
+  });
+
+  it("un segundo POST con el mismo client_sale_id no duplica venta, caja ni stock", async () => {
+    await seedSku("sku-doble", 100, 5);
+    const payload = {
+      client_sale_id: "sale-doble",
+      medio_pago: "Efectivo",
+      lineas: [{ codigo_interno: "sku-doble", cantidad: 1 }],
+      caja_sesion_id: cajaId,
+    };
+    const first = await processSale(payload, { skipFiscal: true });
+    const second = await processSale(payload, { skipFiscal: true });
+    expect(first.duplicada).toBeUndefined();
+    expect(second.duplicada).toBe(true);
+    expect(second.venta_id).toBe(first.venta_id);
+
+    const ventas = await pool.query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM pos_ventas`);
+    const movs = await pool.query<{ n: number; total: string }>(
+      `SELECT COUNT(*)::int AS n, COALESCE(SUM(amount), 0)::text AS total
+       FROM pos_caja_movimientos WHERE estado = 'activo'`,
+    );
+    const stock = await pool.query<{ stock: number }>(
+      `SELECT stock FROM product_variants WHERE sku = 'sku-doble'`,
+    );
+    expect(ventas.rows[0].n).toBe(1);
+    expect(movs.rows[0].n).toBe(1);
+    expect(Number(movs.rows[0].total)).toBe(100);
+    expect(stock.rows[0].stock).toBe(4);
+  });
+
+  it("el lote offline cuenta duplicadas por el flag", async () => {
+    await seedSku("sku-off", 100, 5);
+    const venta = {
+      client_sale_id: "sale-off",
+      medio_pago: "Efectivo",
+      lineas: [{ codigo_interno: "sku-off", cantidad: 1 }],
+      caja_sesion_id: cajaId,
+      sincronizada_offline: true as const,
+    };
+    const result = await processOfflineBatch([venta, venta]);
+    expect(result.procesadas).toBe(1);
+    expect(result.duplicadas).toBe(1);
+    expect(result.errores).toHaveLength(0);
+    const ventas = await pool.query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM pos_ventas`);
+    const stock = await pool.query<{ stock: number }>(
+      `SELECT stock FROM product_variants WHERE sku = 'sku-off'`,
+    );
+    expect(ventas.rows[0].n).toBe(1);
+    expect(stock.rows[0].stock).toBe(4);
   });
 });

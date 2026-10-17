@@ -8,7 +8,7 @@ export const saleLineSchema = z.object({
 });
 
 export const createSaleSchema = z.object({
-  client_sale_id: z.string().max(64).optional(),
+  client_sale_id: z.string().min(1).max(64),
   cliente_id: z.number().int().positive().optional(),
   medio_pago: z.string().min(1).max(64),
   lineas: z.array(saleLineSchema).min(1),
