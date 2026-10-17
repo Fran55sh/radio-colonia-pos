@@ -17,7 +17,8 @@ import {
   CONDICION_IVA_NO_RESPONSABLE,
   CONDICION_IVA_RI,
 } from "./iva-condiciones.js";
-import { lineasToArcaItems } from "./mappers.js";
+import { buildFECAEDetRequest } from "./mappers.js";
+import { calcularImportesVenta } from "../../lib/fiscal-importes.js";
 
 describe("mapeo condición IVA → tipo de comprobante (RG 5003/2021)", () => {
   const casosA: Array<[string, number]> = [
@@ -89,14 +90,20 @@ describe("IVA discriminado en comprobantes A", () => {
     expect(discriminaIva(CbteTipo.FACTURA_C)).toBe(false);
   });
 
-  it("ítems de Factura A envían neto + alícuota (ImpNeto e ImpIVA)", () => {
-    const items = lineasToArcaItems([
-      { neto_linea: 100, iva_linea: 21, exento_linea: 0, alicuota_iva: 21 },
-    ]);
-    expect(items).toHaveLength(1);
-    expect(items[0]?.neto).toBe(100);
-    expect(items[0]?.iva).toBe(IvaTipo.IVA_21);
-    expect(items[0]?.exento).toBeFalsy();
+  it("Factura A envía ImpNeto e ImpIVA explícitos", () => {
+    const detail = buildFECAEDetRequest({
+      cbteNro: 1,
+      cbteFch: "20261017",
+      docTipo: 80,
+      docNro: 20111111112,
+      condicionIva: 6,
+      importes: calcularImportesVenta([
+        { orden: 0, cantidad: 1, precio_unitario: 121, alicuota: 21 },
+      ]),
+    });
+    expect(detail.ImpNeto).toBe(100);
+    expect(detail.ImpIVA).toBe(21);
+    expect(detail.Iva?.[0]?.Id).toBe(IvaTipo.IVA_21);
     expect(discriminaIva(CbteTipo.FACTURA_A)).toBe(true);
   });
 });

@@ -1,10 +1,11 @@
-import { ArcaWSFEError, DocTipo } from "@ramiidv/arca-facturacion";
 import { getArcaConfig, isArcaConfigured } from "../../config/arca.js";
+import { calcularImportesVenta, moneyFromCents } from "../../lib/fiscal-importes.js";
 import { AppError } from "../../middleware/errors.js";
 import { getArcaClient } from "./arca-client.js";
 import { cbteTipoPorCondicionIva } from "./cbte-tipo.js";
 import { CONDICION_IVA_CF } from "./iva-condiciones.js";
-import { buildQrUrl, lineasToArcaItems } from "./mappers.js";
+import { buildFECAEDetRequest, buildQrUrl, parseFECAESolicitar } from "./mappers.js";
+import { ArcaWSFEError, DocTipo } from "@ramiidv/arca-facturacion";
 import { resolverComprobante } from "./resolver.js";
 import {
   ensureComprobantePendiente,
@@ -16,6 +17,10 @@ import {
   withVentaFiscalLock,
 } from "./repository.js";
 import type { ComprobanteFiscalResponse } from "./types.js";
+
+function fechaHoyAR(now = new Date()): string {
+  return now.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+}
 
 function formatArcaDate(value: string): string {
   if (value.includes("-")) return value.slice(0, 10);
@@ -114,57 +119,82 @@ async function ejecutarEmision(
     total: ctx.total,
   });
 
-  let items;
+  let importes;
   try {
-    items = lineasToArcaItems(ctx.lineas);
+    importes = calcularImportesVenta(
+      ctx.lineas.map((linea) => ({
+        orden: linea.orden,
+        cantidad: linea.cantidad,
+        precio_unitario: linea.precio_unitario,
+        alicuota: linea.alicuota_iva,
+      })),
+    );
+    if (importes.total_cents !== Math.round(ctx.total * 100) || importes.total_cents <= 0) {
+      throw new AppError(
+        409,
+        "IMPORTES_INCONSISTENTES",
+        "Los importes de las líneas no cierran con el total de la venta",
+      );
+    }
   } catch (err) {
     return await marcarFallaPrevia(ventaId, err);
   }
 
-  let result;
+  const fechaCbte = fechaHoyAR();
+  const detail = buildFECAEDetRequest({
+    cbteNro: 0,
+    cbteFch: fechaCbte.replace(/-/g, ""),
+    docTipo: resuelto.docTipo,
+    docNro: resuelto.docNro,
+    condicionIva: resuelto.condicionIva,
+    importes,
+  });
+
+  let raw;
   try {
-    result = await arca.facturar({
-      ptoVta: arcaConfig.ptoVta,
-      cbteTipo: resuelto.cbteTipo,
-      docTipo: resuelto.docTipo,
-      docNro: resuelto.docNro,
-      condicionIva: resuelto.condicionIva,
-      items,
+    const ultimo = await arca.ultimoComprobante(arcaConfig.ptoVta, resuelto.cbteTipo);
+    detail.CbteDesde = ultimo + 1;
+    detail.CbteHasta = ultimo + 1;
+    raw = await arca.crearFactura({
+      PtoVta: arcaConfig.ptoVta,
+      CbteTipo: resuelto.cbteTipo,
+      invoices: [detail],
     });
   } catch (err) {
     return await marcarFallaPrevia(ventaId, err);
   }
 
-  if (!result.aprobada || !result.cae || result.cbteNro == null) {
+  const parsed = parseFECAESolicitar(raw);
+  if (!parsed.aprobada || !parsed.cae || !parsed.cbteNro) {
     const msg =
-      result.observaciones?.map((o) => `[${o.code}] ${o.msg}`).join("; ") ??
+      parsed.observaciones.map((o) => `[${o.code}] ${o.msg}`).join("; ") ||
       "ARCA rechazó el comprobante sin detalle";
-    await marcarComprobanteError(ventaId, "ARCA_REJECTED", msg, result);
+    await marcarComprobanteError(ventaId, "ARCA_REJECTED", msg, raw);
     const row = await getComprobanteByVentaId(ventaId);
     return rowToFiscalResponse(row!);
   }
 
-  const fechaCbte = new Date().toISOString().slice(0, 10);
+  const impTotal = moneyFromCents(importes.total_cents);
   const qrUrl = buildQrUrl(arca, {
     fecha: fechaCbte,
     cuit: arcaConfig.cuit,
     ptoVta: arcaConfig.ptoVta,
     cbteTipo: resuelto.cbteTipo,
-    cbteNro: result.cbteNro,
-    total: ctx.total,
+    cbteNro: parsed.cbteNro,
+    total: impTotal,
     docTipo: resuelto.docTipo,
     docNro: resuelto.docNro,
-    cae: result.cae,
+    cae: parsed.cae,
   });
 
-  const caeVenc = formatArcaDate(result.caeVencimiento ?? "");
+  const caeVenc = formatArcaDate(parsed.caeVencimiento ?? "");
   const persisted = await persistirEmitido(ventaId, {
-    cbte_nro: result.cbteNro,
+    cbte_nro: parsed.cbteNro,
     fecha_cbte: fechaCbte,
-    cae: result.cae,
+    cae: parsed.cae,
     cae_vencimiento: caeVenc || null,
     qr_url: qrUrl,
-    raw_response: result,
+    raw_response: raw,
   });
 
   if (persisted) {
@@ -177,9 +207,9 @@ async function ejecutarEmision(
     comprobante: null,
     cbte_tipo: resuelto.cbteTipo,
     cbte_tipo_label: "",
-    cbte_nro: result.cbteNro,
+    cbte_nro: parsed.cbteNro,
     punto_venta: arcaConfig.ptoVta,
-    cae: result.cae,
+    cae: parsed.cae,
     cae_vencimiento: caeVenc || null,
     qr_url: qrUrl,
     error_message: null,
