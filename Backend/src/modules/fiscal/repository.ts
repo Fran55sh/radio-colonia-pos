@@ -1,4 +1,4 @@
-import { pool } from "../../config/db.js";
+import { pool, withTransaction } from "../../config/db.js";
 import type { ClienteFiscal, ComprobanteFiscalResponse, FiscalEstado, LineaFiscal } from "./types.js";
 import { cbteTipoLabel, formatComprobanteNumero } from "./mappers.js";
 
@@ -175,48 +175,55 @@ export async function marcarComprobanteEmitido(
     cbte_nro: number;
     fecha_cbte: string;
     cae: string;
-    cae_vencimiento: string;
+    cae_vencimiento: string | null;
     qr_url: string;
     raw_response: unknown;
   },
 ): Promise<void> {
-  await pool.query(
-    `UPDATE pos_comprobantes_fiscales SET
-      estado = 'emitido',
-      cbte_nro = $2,
-      fecha_cbte = $3::date,
-      cae = $4,
-      cae_vencimiento = $5::date,
-      qr_url = $6,
-      raw_response = $7,
-      error_code = NULL,
-      error_message = NULL,
-      updated_at = NOW()
-     WHERE venta_id = $1`,
-    [
-      ventaId,
-      data.cbte_nro,
-      data.fecha_cbte,
-      data.cae,
-      data.cae_vencimiento,
-      data.qr_url,
-      JSON.stringify(data.raw_response),
-    ],
-  );
+  await withTransaction(async (client) => {
+    await client.query(
+      `UPDATE pos_comprobantes_fiscales SET
+        estado = 'emitido',
+        cbte_nro = $2,
+        fecha_cbte = $3::date,
+        cae = $4,
+        cae_vencimiento = $5::date,
+        qr_url = $6,
+        raw_response = $7,
+        error_code = NULL,
+        error_message = NULL,
+        updated_at = NOW()
+       WHERE venta_id = $1 AND cae IS NULL`,
+      [
+        ventaId,
+        data.cbte_nro,
+        data.fecha_cbte,
+        data.cae,
+        data.cae_vencimiento,
+        data.qr_url,
+        JSON.stringify(data.raw_response),
+      ],
+    );
 
-  const comp = await getComprobanteByVentaId(ventaId);
-  if (comp?.cbte_nro) {
-    const comprobanteStr = formatComprobanteNumero(
-      comp.punto_venta,
-      comp.cbte_tipo,
-      comp.cbte_nro,
+    const comp = await client.query<ComprobanteRow>(
+      `SELECT punto_venta, cbte_tipo, cbte_nro
+       FROM pos_comprobantes_fiscales WHERE venta_id = $1`,
+      [ventaId],
     );
-    await pool.query(
-      `UPDATE pos_iva_registro SET comprobante = $2
-       WHERE referencia_tipo = 'pos_venta' AND referencia_id = $1`,
-      [ventaId, comprobanteStr],
-    );
-  }
+    const row = comp.rows[0];
+    if (row?.cbte_nro) {
+      const comprobanteStr = formatComprobanteNumero(
+        row.punto_venta,
+        row.cbte_tipo,
+        row.cbte_nro,
+      );
+      await client.query(
+        `UPDATE pos_iva_registro SET comprobante = $2
+         WHERE referencia_tipo = 'pos_venta' AND referencia_id = $1`,
+        [ventaId, comprobanteStr],
+      );
+    }
+  });
 }
 
 export async function marcarComprobanteError(
@@ -232,7 +239,7 @@ export async function marcarComprobanteError(
       error_message = $3,
       raw_response = $4,
       updated_at = NOW()
-     WHERE venta_id = $1`,
+     WHERE venta_id = $1 AND cae IS NULL AND estado <> 'emitido'`,
     [ventaId, errorCode, errorMessage, raw ? JSON.stringify(raw) : null],
   );
 }

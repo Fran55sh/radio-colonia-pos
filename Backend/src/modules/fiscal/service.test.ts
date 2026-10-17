@@ -180,6 +180,61 @@ describe("emitirComprobanteVenta idempotency", () => {
     );
   });
 
+  it("trata como emitido un comprobante con CAE aunque el estado sea error", async () => {
+    getComprobanteByVentaId.mockResolvedValue({
+      estado: "error",
+      cae: "555",
+      ambiente: "dev",
+    });
+    rowToFiscalResponse.mockReturnValue({ estado: "error", cae: "555" });
+    const facturar = vi.fn();
+    getArcaClient.mockReturnValue({ facturar });
+
+    const result = await emitirComprobanteVenta(10, { forceRetry: true });
+    expect(result).toMatchObject({ estado: "emitido", cae: "555" });
+    expect(facturar).not.toHaveBeenCalled();
+    expect(marcarComprobanteError).not.toHaveBeenCalled();
+  });
+
+  it("marca error si lineasToArcaItems falla antes de facturar", async () => {
+    getComprobanteByVentaId.mockResolvedValue({ estado: "pendiente", cae: null });
+    ensureComprobantePendiente.mockResolvedValue({ estado: "pendiente" });
+    lineasToArcaItems.mockImplementation(() => {
+      throw new Error("sin importes");
+    });
+    const facturar = vi.fn();
+    getArcaClient.mockReturnValue({ facturar });
+    rowToFiscalResponse.mockReturnValue({ estado: "error", cae: null });
+
+    await emitirComprobanteVenta(10);
+    expect(facturar).not.toHaveBeenCalled();
+    expect(marcarComprobanteError).toHaveBeenCalledWith(
+      10,
+      "ARCA_ERROR",
+      "sin importes",
+      expect.any(Error),
+    );
+  });
+
+  it("no marca error si la persistencia falla despues del CAE", async () => {
+    getComprobanteByVentaId.mockResolvedValue({ estado: "pendiente", cae: null, ambiente: "dev" });
+    ensureComprobantePendiente.mockResolvedValue({ estado: "pendiente" });
+    marcarComprobanteEmitido.mockRejectedValue(new Error("db caida"));
+    const facturar = vi.fn().mockResolvedValue({
+      aprobada: true,
+      cae: "777",
+      cbteNro: 4,
+      caeVencimiento: "20261231",
+    });
+    getArcaClient.mockReturnValue({ facturar });
+
+    const result = await emitirComprobanteVenta(10);
+    expect(facturar).toHaveBeenCalledOnce();
+    expect(marcarComprobanteEmitido).toHaveBeenCalledTimes(3);
+    expect(marcarComprobanteError).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ estado: "emitido", cae: "777" });
+  });
+
   it("maybeEmitirDespuesDeVenta skips when skipFiscal", async () => {
     const result = await maybeEmitirDespuesDeVenta(10, { skipFiscal: true });
     expect(result).toBeNull();

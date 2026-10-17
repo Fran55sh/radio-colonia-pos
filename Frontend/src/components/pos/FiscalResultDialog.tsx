@@ -35,7 +35,7 @@ export function FiscalResultDialog({
   if (!fiscal) return null;
 
   const ok = fiscal.estado === "emitido" && !!fiscal.cae;
-  const canRetry = fiscal.estado === "error" || fiscal.estado === "pendiente";
+  const canRetry = !fiscal.cae && (fiscal.estado === "error" || fiscal.estado === "pendiente");
 
   async function handleRetry() {
     setRetrying(true);
