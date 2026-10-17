@@ -8,6 +8,7 @@ import { CashMovementDialog } from "@/components/pos/CashMovementDialog";
 import { CashSessionBanner } from "@/components/pos/CashSessionBanner";
 import { CloseRegisterDialog } from "@/components/pos/CloseRegisterDialog";
 import { FiscalResultDialog } from "@/components/pos/FiscalResultDialog";
+import { FiscalPendientesButton } from "@/components/pos/FiscalPendientesButton";
 import { OpenRegisterDialog } from "@/components/pos/OpenRegisterDialog";
 import { PosClock } from "@/components/pos/PosClock";
 import {
@@ -782,6 +783,15 @@ function POS() {
             <RefreshCw className={`size-3.5 ${isLoading ? "animate-spin" : ""}`} />
           </button>
 
+          <FiscalPendientesButton
+            online={online}
+            onOpen={(ventaId, fiscal) => {
+              setLastVentaId(ventaId);
+              setLastFiscal(fiscal);
+              setLastSaleTotal(0);
+              setFiscalDialogOpen(true);
+            }}
+          />
           {connectionBadge}
 
           <button
@@ -799,6 +809,15 @@ function POS() {
 
         {/* Mobile / tablet: compact badge + menu */}
         <div className="flex lg:hidden items-center gap-2">
+          <FiscalPendientesButton
+            online={online}
+            onOpen={(ventaId, fiscal) => {
+              setLastVentaId(ventaId);
+              setLastFiscal(fiscal);
+              setLastSaleTotal(0);
+              setFiscalDialogOpen(true);
+            }}
+          />
           {connectionBadge}
           <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
             <SheetTrigger asChild>
