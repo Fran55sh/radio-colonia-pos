@@ -45,8 +45,8 @@ export async function emitirComprobanteVenta(
 
     // Re-check under lock so concurrent retries cannot double-call WSFE.
     const existing = await getComprobanteByVentaId(ventaId);
-    if (existing?.estado === "emitido" && existing.cae) {
-      return rowToFiscalResponse(existing);
+    if (existing?.cae) {
+      return { ...rowToFiscalResponse(existing), estado: "emitido" };
     }
     if (existing?.estado === "pendiente" && !options?.forceRetry) {
       return await ejecutarEmision(ventaId, ctx, arcaConfig);
@@ -100,8 +100,6 @@ async function ejecutarEmision(
     return rowToFiscalResponse(row!);
   }
 
-  const items = lineasToArcaItems(ctx.lineas);
-
   await ensureComprobantePendiente(ventaId, {
     ambiente: arcaConfig.ambiente,
     emisor_cuit: String(arcaConfig.cuit),
@@ -116,8 +114,16 @@ async function ejecutarEmision(
     total: ctx.total,
   });
 
+  let items;
   try {
-    const result = await arca.facturar({
+    items = lineasToArcaItems(ctx.lineas);
+  } catch (err) {
+    return await marcarFallaPrevia(ventaId, err);
+  }
+
+  let result;
+  try {
+    result = await arca.facturar({
       ptoVta: arcaConfig.ptoVta,
       cbteTipo: resuelto.cbteTipo,
       docTipo: resuelto.docTipo,
@@ -125,55 +131,119 @@ async function ejecutarEmision(
       condicionIva: resuelto.condicionIva,
       items,
     });
-
-    if (!result.aprobada || !result.cae || result.cbteNro == null) {
-      const msg =
-        result.observaciones?.map((o) => `[${o.code}] ${o.msg}`).join("; ") ??
-        "ARCA rechazó el comprobante sin detalle";
-      await marcarComprobanteError(ventaId, "ARCA_REJECTED", msg, result);
-      const row = await getComprobanteByVentaId(ventaId);
-      return rowToFiscalResponse(row!);
-    }
-
-    const fechaCbte = new Date().toISOString().slice(0, 10);
-    const qrUrl = buildQrUrl(arca, {
-      fecha: fechaCbte,
-      cuit: arcaConfig.cuit,
-      ptoVta: arcaConfig.ptoVta,
-      cbteTipo: resuelto.cbteTipo,
-      cbteNro: result.cbteNro,
-      total: ctx.total,
-      docTipo: resuelto.docTipo,
-      docNro: resuelto.docNro,
-      cae: result.cae,
-    });
-
-    const caeVenc = formatArcaDate(result.caeVencimiento ?? fechaCbte.replace(/-/g, ""));
-
-    await marcarComprobanteEmitido(ventaId, {
-      cbte_nro: result.cbteNro,
-      fecha_cbte: fechaCbte,
-      cae: result.cae,
-      cae_vencimiento: caeVenc,
-      qr_url: qrUrl,
-      raw_response: result,
-    });
-
-    const row = await getComprobanteByVentaId(ventaId);
-    return rowToFiscalResponse(row!);
   } catch (err) {
-    const code = err instanceof ArcaWSFEError ? "ARCA_WSFE_ERROR" : "ARCA_ERROR";
-    const message =
-      err instanceof ArcaWSFEError
-        ? err.errors.map((e) => `[${e.code}] ${e.msg}`).join("; ")
-        : err instanceof Error
-          ? err.message
-          : "Error desconocido al emitir comprobante";
+    return await marcarFallaPrevia(ventaId, err);
+  }
 
-    await marcarComprobanteError(ventaId, code, message, err);
+  if (!result.aprobada || !result.cae || result.cbteNro == null) {
+    const msg =
+      result.observaciones?.map((o) => `[${o.code}] ${o.msg}`).join("; ") ??
+      "ARCA rechazó el comprobante sin detalle";
+    await marcarComprobanteError(ventaId, "ARCA_REJECTED", msg, result);
     const row = await getComprobanteByVentaId(ventaId);
     return rowToFiscalResponse(row!);
   }
+
+  const fechaCbte = new Date().toISOString().slice(0, 10);
+  const qrUrl = buildQrUrl(arca, {
+    fecha: fechaCbte,
+    cuit: arcaConfig.cuit,
+    ptoVta: arcaConfig.ptoVta,
+    cbteTipo: resuelto.cbteTipo,
+    cbteNro: result.cbteNro,
+    total: ctx.total,
+    docTipo: resuelto.docTipo,
+    docNro: resuelto.docNro,
+    cae: result.cae,
+  });
+
+  const caeVenc = formatArcaDate(result.caeVencimiento ?? "");
+  const persisted = await persistirEmitido(ventaId, {
+    cbte_nro: result.cbteNro,
+    fecha_cbte: fechaCbte,
+    cae: result.cae,
+    cae_vencimiento: caeVenc || null,
+    qr_url: qrUrl,
+    raw_response: result,
+  });
+
+  if (persisted) {
+    const row = await getComprobanteByVentaId(ventaId);
+    if (row?.cae) return { ...rowToFiscalResponse(row), estado: "emitido" };
+  }
+
+  return {
+    estado: "emitido",
+    comprobante: null,
+    cbte_tipo: resuelto.cbteTipo,
+    cbte_tipo_label: "",
+    cbte_nro: result.cbteNro,
+    punto_venta: arcaConfig.ptoVta,
+    cae: result.cae,
+    cae_vencimiento: caeVenc || null,
+    qr_url: qrUrl,
+    error_message: null,
+    ambiente: arcaConfig.ambiente,
+  };
+}
+
+async function marcarFallaPrevia(
+  ventaId: number,
+  err: unknown,
+): Promise<ComprobanteFiscalResponse> {
+  const code = err instanceof ArcaWSFEError
+    ? "ARCA_WSFE_ERROR"
+    : err instanceof AppError
+      ? err.code
+      : "ARCA_ERROR";
+  const message = err instanceof ArcaWSFEError
+    ? err.errors.map((e) => `[${e.code}] ${e.msg}`).join("; ")
+    : err instanceof Error
+      ? err.message
+      : "Error desconocido al emitir comprobante";
+  await marcarComprobanteError(ventaId, code, message, err);
+  const row = await getComprobanteByVentaId(ventaId);
+  if (row?.cae) return { ...rowToFiscalResponse(row), estado: "emitido" };
+  return rowToFiscalResponse(row!);
+}
+
+async function persistirEmitido(
+  ventaId: number,
+  data: {
+    cbte_nro: number;
+    fecha_cbte: string;
+    cae: string;
+    cae_vencimiento: string | null;
+    qr_url: string;
+    raw_response: unknown;
+  },
+): Promise<boolean> {
+  let last: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await marcarComprobanteEmitido(ventaId, {
+        ...data,
+        cae_vencimiento: data.cae_vencimiento,
+      });
+      return true;
+    } catch (err) {
+      last = err;
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 40 * attempt));
+      }
+    }
+  }
+  console.error(
+    JSON.stringify({
+      level: "CRITICAL",
+      msg: "CAE obtenido y persistencia fallida",
+      venta_id: ventaId,
+      cbte_nro: data.cbte_nro,
+      cae: data.cae,
+      error: last instanceof Error ? last.message : "error de persistencia",
+    }),
+  );
+  return false;
 }
 
 export async function maybeEmitirDespuesDeVenta(

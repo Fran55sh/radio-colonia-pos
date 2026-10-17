@@ -10,7 +10,8 @@ import {
 } from "../../lib/catalog.js";
 import { DEFAULT_IVA_ALICUOTA } from "../../lib/constants.js";
 import { splitPriceWithIva } from "../../lib/iva.js";
-import { resolveUnitPrice } from "../../lib/quantity-pricing.js";
+import { resolveEffectiveTiers } from "../../lib/qty-discount-scope.js";
+import { resolveUnitPrice, type PriceTier } from "../../lib/quantity-pricing.js";
 import { insertStockLedger } from "../../lib/stock-ledger.js";
 import type { AuthContext } from "../../middleware/auth.js";
 import { AppError } from "../../middleware/errors.js";
@@ -20,7 +21,8 @@ import {
   resolveSesionForSale,
 } from "../caja/service.js";
 import { getClienteFiscalById } from "../clientes/service.js";
-import { maybeEmitirDespuesDeVenta } from "../fiscal/service.js";
+import { isArcaConfigured } from "../../config/arca.js";
+import { getFiscalStatus, maybeEmitirDespuesDeVenta } from "../fiscal/service.js";
 import type { ComprobanteFiscalResponse } from "../fiscal/types.js";
 import type { CreateSaleInput } from "./schemas.js";
 
@@ -239,6 +241,115 @@ export type ProcessSaleOpts = {
   authContext?: AuthContext;
 };
 
+let postCommitFaultForTests: (() => void) | null = null;
+
+/** Inyecta un error justo después del COMMIT. Solo tests. */
+export function setPostCommitFaultForTests(fn: (() => void) | null): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("setPostCommitFaultForTests solo se usa con NODE_ENV=test");
+  }
+  postCommitFaultForTests = fn;
+}
+
+async function precioUnitarioDeLinea(
+  codigo: string,
+  cantidad: number,
+): Promise<number | null> {
+  const sku = codigo.trim().toLowerCase();
+  const { rows } = await pool.query<{
+    precio: number;
+    scope: string;
+    product_tiers: PriceTier[] | null;
+    variant_tiers: PriceTier[] | null;
+  }>(
+    `SELECT COALESCE(pv.sale_price, p.price)::float AS precio,
+            COALESCE(p.qty_discount_scope, 'per_variant') AS scope,
+            (
+              SELECT json_agg(json_build_object('minQty', t.min_qty, 'unitPrice', t.unit_price::float) ORDER BY t.min_qty)
+              FROM product_price_tiers t WHERE t.product_id = p.id
+            ) AS product_tiers,
+            (
+              SELECT json_agg(json_build_object('minQty', t.min_qty, 'unitPrice', t.unit_price::float) ORDER BY t.min_qty)
+              FROM product_variant_price_tiers t WHERE t.variant_id = pv.id
+            ) AS variant_tiers
+     FROM product_variants pv
+     INNER JOIN products p ON p.id = pv.product_id
+     WHERE pv.sku = $1 AND p.is_active = TRUE`,
+    [sku],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  const tiers = resolveEffectiveTiers(row.scope, row.product_tiers ?? [], row.variant_tiers ?? []);
+  return resolveUnitPrice(Number(row.precio), tiers, cantidad);
+}
+
+/** D7: con ARCA activo, una venta de $0 no llega a tocar stock. */
+async function assertImportesSiArca(input: CreateSaleInput): Promise<void> {
+  if (!isArcaConfigured()) return;
+  let totalCents = 0;
+  let cotizadas = 0;
+  for (const linea of input.lineas) {
+    const precio = await precioUnitarioDeLinea(linea.codigo_interno, linea.cantidad);
+    if (precio == null) continue;
+    cotizadas += 1;
+    const lineCents = Math.round(precio * linea.cantidad * 100);
+    if (lineCents <= 0) {
+      throw new AppError(400, "VENTA_SIN_IMPORTES", "La venta no tiene importes facturables");
+    }
+    totalCents += lineCents;
+  }
+  if (cotizadas > 0 && totalCents <= 0) {
+    throw new AppError(400, "VENTA_SIN_IMPORTES", "La venta no tiene importes facturables");
+  }
+}
+
+function fiscalPorFalloPosterior(err: unknown): ComprobanteFiscalResponse {
+  const message = err instanceof Error ? err.message : "Error posterior al registro de la venta";
+  return {
+    estado: "error",
+    comprobante: null,
+    cbte_tipo: 0,
+    cbte_tipo_label: "",
+    cbte_nro: null,
+    punto_venta: 0,
+    cae: null,
+    cae_vencimiento: null,
+    qr_url: null,
+    error_message: message,
+    ambiente: "",
+  };
+}
+
+/** La venta ya está confirmada: esta función no lanza. */
+async function emitirSeguro(
+  ventaId: number,
+  opts?: ProcessSaleOpts,
+): Promise<ComprobanteFiscalResponse | null> {
+  try {
+    postCommitFaultForTests?.();
+    return await maybeEmitirDespuesDeVenta(ventaId, {
+      skipFiscal: opts?.skipFiscal === true,
+    });
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        msg: "emision posterior al commit",
+        venta_id: ventaId,
+        error: err instanceof Error ? err.message : "error",
+      }),
+    );
+    try {
+      const existing = await getFiscalStatus(ventaId);
+      if (existing?.cae) return { ...existing, estado: "emitido" };
+      if (existing) return existing;
+    } catch {
+      // La respuesta de la venta no depende de poder releer el comprobante.
+    }
+    return fiscalPorFalloPosterior(err);
+  }
+}
+
 export async function processSale(
   input: CreateSaleInput,
   opts?: ProcessSaleOpts,
@@ -268,9 +379,8 @@ export async function processSale(
         );
         cajaMovimientoId = ensured.row.id;
       }
-      const fiscal = await maybeEmitirDespuesDeVenta(existing.id, {
-        skipFiscal: false,
-      });
+      const yaEmitido = await getFiscalStatus(existing.id);
+      const fiscal = yaEmitido ?? (await emitirSeguro(existing.id));
       throw new AppError(409, "DUPLICATE_OFFLINE_SALE", "Venta ya registrada", {
         venta_id: existing.id,
         total: existing.total,
@@ -280,50 +390,44 @@ export async function processSale(
     }
   }
 
+  await assertImportesSiArca(input);
+
   const label = actorLabel(opts?.authContext);
 
   let lastError: unknown;
+  let committed: {
+    ventaId: number;
+    totalVenta: number;
+    cajaMovimientoId: number | undefined;
+  } | null = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const { ventaId, totalVenta, cajaMovimientoId } = await withTransaction(
-        async (client) => {
-          const sale = await registerSaleInTransaction(
-            client,
-            input,
-            resolved?.sesion_id ?? null,
-            label,
-          );
-          let movId: number | undefined;
-          if (resolved) {
-            const ensured = await ensureSaleMovimiento(client, {
-              sesion_id: resolved.sesion_id,
-              amount: sale.totalVenta,
-              payment_method: input.medio_pago,
-              source_id: String(sale.ventaId),
-              created_by_label: label,
-              post_cierre_offline: resolved.post_cierre_offline,
-            });
-            movId = ensured.row.id;
-          }
-          return {
-            ventaId: sale.ventaId,
-            totalVenta: sale.totalVenta,
-            cajaMovimientoId: movId,
-          };
-        },
-      );
-
-      const fiscal = await maybeEmitirDespuesDeVenta(ventaId, {
-        skipFiscal: opts?.skipFiscal === true,
+      committed = await withTransaction(async (client) => {
+        const sale = await registerSaleInTransaction(
+          client,
+          input,
+          resolved?.sesion_id ?? null,
+          label,
+        );
+        let movId: number | undefined;
+        if (resolved) {
+          const ensured = await ensureSaleMovimiento(client, {
+            sesion_id: resolved.sesion_id,
+            amount: sale.totalVenta,
+            payment_method: input.medio_pago,
+            source_id: String(sale.ventaId),
+            created_by_label: label,
+            post_cierre_offline: resolved.post_cierre_offline,
+          });
+          movId = ensured.row.id;
+        }
+        return {
+          ventaId: sale.ventaId,
+          totalVenta: sale.totalVenta,
+          cajaMovimientoId: movId,
+        };
       });
-
-      return {
-        venta_id: ventaId,
-        total: totalVenta,
-        client_sale_id: input.client_sale_id,
-        fiscal,
-        caja_movimiento_id: cajaMovimientoId,
-      };
+      break;
     } catch (err: unknown) {
       lastError = err;
       const isDeadlock =
@@ -341,7 +445,16 @@ export async function processSale(
     }
   }
 
-  throw lastError;
+  if (!committed) throw lastError;
+
+  const fiscal = await emitirSeguro(committed.ventaId, opts);
+  return {
+    venta_id: committed.ventaId,
+    total: committed.totalVenta,
+    client_sale_id: input.client_sale_id,
+    fiscal,
+    caja_movimiento_id: committed.cajaMovimientoId,
+  };
 }
 
 export async function processOfflineBatch(
