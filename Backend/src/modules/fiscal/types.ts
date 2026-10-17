@@ -10,6 +10,9 @@ export type ClienteFiscal = {
 };
 
 export type LineaFiscal = {
+  orden: number;
+  cantidad: number;
+  precio_unitario: number;
   neto_linea: number;
   iva_linea: number;
   exento_linea: number;

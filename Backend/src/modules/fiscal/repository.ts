@@ -44,13 +44,16 @@ export async function loadVentaFiscalContext(ventaId: number): Promise<{
 
   const v = ventaRes.rows[0];
   const lineasRes = await pool.query<{
+    cantidad: string;
+    precio_unitario: string;
     neto_linea: string;
     iva_linea: string;
     exento_linea: string;
     alicuota_iva: string;
   }>(
-    `SELECT neto_linea, iva_linea, exento_linea, alicuota_iva
-     FROM pos_lineas_venta WHERE venta_id = $1`,
+    `SELECT cantidad, precio_unitario, neto_linea, iva_linea, exento_linea, alicuota_iva
+     FROM pos_lineas_venta WHERE venta_id = $1
+     ORDER BY id`,
     [ventaId],
   );
 
@@ -71,7 +74,10 @@ export async function loadVentaFiscalContext(ventaId: number): Promise<{
     iva_total: Number(v.iva_total),
     exento: Number(v.exento),
     total: Number(v.total),
-    lineas: lineasRes.rows.map((l) => ({
+    lineas: lineasRes.rows.map((l, index) => ({
+      orden: index,
+      cantidad: Number(l.cantidad),
+      precio_unitario: Number(l.precio_unitario),
       neto_linea: Number(l.neto_linea),
       iva_linea: Number(l.iva_linea),
       exento_linea: Number(l.exento_linea),

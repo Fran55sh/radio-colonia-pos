@@ -9,7 +9,7 @@ import {
   type ProductoCaja,
 } from "../../lib/catalog.js";
 import { DEFAULT_IVA_ALICUOTA } from "../../lib/constants.js";
-import { splitPriceWithIva } from "../../lib/iva.js";
+import { calcularImportesVenta, centsToDecimal, moneyFromCents } from "../../lib/fiscal-importes.js";
 import { resolveEffectiveTiers } from "../../lib/qty-discount-scope.js";
 import { resolveUnitPrice, type PriceTier } from "../../lib/quantity-pricing.js";
 import { insertStockLedger } from "../../lib/stock-ledger.js";
@@ -125,7 +125,6 @@ async function registerSaleInTransaction(
 
     const alicuota = variant.alicuota_iva ?? DEFAULT_IVA_ALICUOTA;
     const totalLinea = precio * linea.cantidad;
-    const breakdown = splitPriceWithIva(totalLinea, alicuota);
 
     lineasDetalle.push({
       variant_id: variant.variant_id,
@@ -138,19 +137,34 @@ async function registerSaleInTransaction(
       supplier_id_snapshot: variant.supplier_id,
       supplier_code_snapshot: variant.supplier_code,
       alicuota_iva: alicuota,
-      neto_linea: breakdown.netoGravado,
-      iva_linea: breakdown.iva,
-      exento_linea: breakdown.exento,
-      total_linea: breakdown.total,
+      neto_linea: 0,
+      iva_linea: 0,
+      exento_linea: 0,
+      total_linea: totalLinea,
       stock_before: variant.stock_before,
       stock_after: variant.stock_after,
     });
-
-    netoTotal += breakdown.netoGravado;
-    ivaTotal += breakdown.iva;
-    exentoTotal += breakdown.exento;
-    totalVenta += breakdown.total;
   }
+
+  const importes = calcularImportesVenta(
+    lineasDetalle.map((linea, orden) => ({
+      orden,
+      cantidad: linea.cantidad,
+      precio_unitario: linea.precio_unitario,
+      alicuota: linea.alicuota_iva,
+    })),
+  );
+  lineasDetalle.forEach((linea, orden) => {
+    const importe = importes.lineas[orden];
+    linea.neto_linea = Number(centsToDecimal(importe.neto_cents));
+    linea.iva_linea = Number(centsToDecimal(importe.iva_cents));
+    linea.exento_linea = Number(centsToDecimal(importe.exento_cents));
+    linea.total_linea = Number(centsToDecimal(importe.total_cents));
+  });
+  netoTotal = moneyFromCents(importes.neto_cents);
+  ivaTotal = moneyFromCents(importes.iva_cents);
+  exentoTotal = moneyFromCents(importes.exento_cents);
+  totalVenta = moneyFromCents(importes.total_cents);
 
   await syncProductsStockBatch(
     client,

@@ -224,4 +224,31 @@ describe.skipIf(!enabled)("guardas fiscales de la venta", () => {
     expect(ventas.rows[0].n).toBe(1);
     expect(stock.rows[0].stock).toBe(4);
   });
+
+  it("$100 @21% envía 82,64 / 17,36 / 100 y el QR usa 100", async () => {
+    await seedSku("sku-100", 100, 5);
+    const result = await processSale({
+      client_sale_id: "sale-100",
+      medio_pago: "Efectivo",
+      lineas: [{ codigo_interno: "sku-100", cantidad: 1 }],
+      caja_sesion_id: cajaId,
+    });
+    expect(result.total).toBe(100);
+    expect(result.fiscal?.estado).toBe("emitido");
+    const line = await pool.query<{ neto_linea: string; iva_linea: string; total_linea: string }>(
+      `SELECT neto_linea::text, iva_linea::text, total_linea::text FROM pos_lineas_venta`,
+    );
+    expect(line.rows[0]).toEqual({ neto_linea: "82.64", iva_linea: "17.36", total_linea: "100.00" });
+    const book = [...fake.book.values()];
+    expect(book).toHaveLength(1);
+    expect(book[0]).toMatchObject({ impTotal: 100, impNeto: 82.64, impIva: 17.36 });
+    const qr = JSON.parse(
+      Buffer.from(result.fiscal!.qr_url!.split("p=")[1], "base64").toString("utf8"),
+    ) as { importe: number };
+    expect(qr.importe).toBe(100);
+    const mov = await pool.query<{ amount: string }>(
+      `SELECT amount::text FROM pos_caja_movimientos WHERE estado = 'activo'`,
+    );
+    expect(mov.rows[0].amount).toBe("100.00");
+  });
 });
