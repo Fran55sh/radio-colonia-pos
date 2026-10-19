@@ -1,8 +1,11 @@
 import { pool, withTransaction, type DbClient } from "../../config/db.js";
 import { env } from "../../config/env.js";
+import { syncProductsStockBatch } from "../../lib/catalog.js";
+import { insertStockLedger } from "../../lib/stock-ledger.js";
+import { AppError } from "../../middleware/errors.js";
 import type { ClienteFiscal, ComprobanteFiscalResponse, FiscalEstado, LineaFiscal } from "./types.js";
 import { cbteTipoLabel, formatComprobanteNumero } from "./mappers.js";
-import { puedeReintentar, requiereConciliacion } from "./estado.js";
+import { puedeEliminarSinFactura, puedeReintentar, requiereConciliacion } from "./estado.js";
 
 export type ComprobanteRow = {
   id: number;
@@ -507,6 +510,164 @@ export async function resolverIntento(
   });
 }
 
+/**
+ * Anula una venta cobrada que nunca obtuvo CAE.
+ * Devuelve stock, anula el movimiento de caja y saca el libro IVA.
+ * Idempotente si la venta ya está anulada.
+ */
+export async function anularVentaSinFactura(
+  db: Queryable,
+  ventaId: number,
+  actor: string,
+): Promise<void> {
+  await withFiscalTransaction(db, async () => {
+    const venta = await db.query<{ estado: string }>(
+      `SELECT estado FROM pos_ventas WHERE id = $1 FOR UPDATE`,
+      [ventaId],
+    );
+    if (venta.rows.length === 0) {
+      throw new AppError(404, "VENTA_NOT_FOUND", "Venta no encontrada");
+    }
+    if (venta.rows[0].estado === "anulada") return;
+
+    const comp = await db.query<{ estado: FiscalEstado; cae: string | null }>(
+      `SELECT estado, cae FROM pos_comprobantes_fiscales WHERE venta_id = $1 FOR UPDATE`,
+      [ventaId],
+    );
+    if (comp.rows.length === 0) {
+      throw new AppError(404, "NOT_FOUND", "Sin comprobante fiscal para esta venta");
+    }
+    const fiscal = comp.rows[0];
+    if (fiscal.cae || fiscal.estado === "emitido") {
+      throw new AppError(
+        409,
+        "VENTA_FACTURADA",
+        "Esta venta ya tiene comprobante de ARCA y no se puede eliminar",
+      );
+    }
+    if (fiscal.estado === "enviando" || fiscal.estado === "desconocido") {
+      throw new AppError(
+        409,
+        "VENTA_SIN_CONFIRMAR",
+        "Primero verificá con ARCA. Si el comprobante no existe, después se puede eliminar",
+      );
+    }
+    if (!puedeEliminarSinFactura(fiscal.estado, fiscal.cae) || venta.rows[0].estado !== "completada") {
+      throw new AppError(409, "VENTA_NO_ELIMINABLE", "Esta venta no se puede eliminar");
+    }
+
+    const lineas = await db.query<{
+      variant_id: string | null;
+      cantidad: number;
+      sku_snapshot: string;
+      name_snapshot: string;
+    }>(
+      `SELECT variant_id, cantidad, sku_snapshot, name_snapshot
+       FROM pos_lineas_venta
+       WHERE venta_id = $1
+       ORDER BY id
+       FOR UPDATE`,
+      [ventaId],
+    );
+
+    const porVariante = new Map<string, { cantidad: number; sku: string; name: string }>();
+    for (const linea of lineas.rows) {
+      if (!linea.variant_id) {
+        throw new AppError(
+          409,
+          "STOCK_IRRECUPERABLE",
+          "No se puede devolver el stock: el producto ya no existe",
+        );
+      }
+      const prev = porVariante.get(linea.variant_id);
+      const cantidad = Number(linea.cantidad);
+      if (prev) prev.cantidad += cantidad;
+      else {
+        porVariante.set(linea.variant_id, {
+          cantidad,
+          sku: linea.sku_snapshot,
+          name: linea.name_snapshot,
+        });
+      }
+    }
+
+    const productIds: string[] = [];
+    for (const variantId of [...porVariante.keys()].sort()) {
+      const item = porVariante.get(variantId)!;
+      const updated = await db.query<{ stock: number; product_id: string; sku: string }>(
+        `UPDATE product_variants
+         SET stock = stock + $1
+         WHERE id = $2
+         RETURNING stock, product_id, sku`,
+        [item.cantidad, variantId],
+      );
+      if (updated.rows.length === 0) {
+        throw new AppError(
+          409,
+          "STOCK_IRRECUPERABLE",
+          "No se puede devolver el stock: el producto ya no existe",
+        );
+      }
+      const stockAfter = Number(updated.rows[0].stock);
+      productIds.push(updated.rows[0].product_id);
+      await insertStockLedger(db as DbClient, {
+        tipo: "ajuste_manual",
+        canal: "pos",
+        actor,
+        ref_tipo: "pos_venta",
+        ref_id: String(ventaId),
+        variant_id: variantId,
+        product_id: updated.rows[0].product_id,
+        sku: updated.rows[0].sku,
+        delta: item.cantidad,
+        stock_before: stockAfter - item.cantidad,
+        stock_after: stockAfter,
+        reason: "alta",
+        source: "pos",
+        note: `Anulación de venta #${ventaId} sin factura`,
+        product_name_snapshot: item.name,
+      });
+    }
+    await syncProductsStockBatch(db as DbClient, productIds);
+
+    await db.query(
+      `UPDATE pos_caja_movimientos
+       SET estado = 'anulado', anulado_at = NOW(), anulado_by_label = $2, anulado_motivo = $3
+       WHERE source_type = 'SALE' AND source_id = $1 AND estado = 'activo'`,
+      [String(ventaId), actor, "Venta eliminada sin factura de ARCA"],
+    );
+
+    await db.query(
+      `DELETE FROM pos_iva_registro
+       WHERE tipo = 'venta' AND referencia_tipo = 'pos_venta' AND referencia_id = $1`,
+      [ventaId],
+    );
+
+    const ventaUpdate = await db.query(
+      `UPDATE pos_ventas SET estado = 'anulada' WHERE id = $1 AND estado = 'completada'`,
+      [ventaId],
+    );
+    if ((ventaUpdate.rowCount ?? 0) !== 1) {
+      throw new AppError(409, "VENTA_NO_ELIMINABLE", "Esta venta no se puede eliminar");
+    }
+
+    const fiscalUpdate = await db.query(
+      `UPDATE pos_comprobantes_fiscales
+       SET estado = 'anulado',
+           error_code = 'ELIMINADA',
+           error_message = 'Venta eliminada sin comprobante de ARCA',
+           updated_at = NOW()
+       WHERE venta_id = $1
+         AND cae IS NULL
+         AND estado IN ('pendiente', 'rechazado', 'error')`,
+      [ventaId],
+    );
+    if ((fiscalUpdate.rowCount ?? 0) !== 1) {
+      throw new AppError(409, "VENTA_NO_ELIMINABLE", "Esta venta no se puede eliminar");
+    }
+  });
+}
+
 export async function listarPendientesFiscales(): Promise<Array<ComprobanteFiscalResponse & { venta_id: number }>> {
   const { rows } = await pool.query<ComprobanteRow>(
     `SELECT c.id, c.venta_id, c.estado, c.ambiente, c.emisor_cuit, c.punto_venta, c.cbte_tipo,
@@ -539,6 +700,7 @@ export function rowToFiscalResponse(row: ComprobanteRow): ComprobanteFiscalRespo
     error_message: row.error_message,
     ambiente: row.ambiente,
     puede_reintentar: puedeReintentar(row.estado, row.cae),
+    puede_eliminar: puedeEliminarSinFactura(row.estado, row.cae),
     requiere_conciliacion: requiereConciliacion(row.estado) && !row.cae,
     imp_total_enviado: row.imp_total_enviado ?? null,
     intento: row.intento_nro_intento == null

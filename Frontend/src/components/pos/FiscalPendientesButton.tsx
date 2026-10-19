@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchFiscalPendientes, type FiscalResult } from "@/lib/api-client";
+import { deleteVentaSinFactura, fetchFiscalPendientes, type FiscalResult } from "@/lib/api-client";
 import {
   Dialog,
   DialogContent,
@@ -29,8 +29,15 @@ function accion(item: FiscalResult): string {
   return "Abrir";
 }
 
+function puedeEliminar(item: FiscalResult): boolean {
+  if (item.puede_eliminar != null) return item.puede_eliminar;
+  return !item.cae && (item.estado === "pendiente" || item.estado === "error" || item.estado === "rechazado");
+}
+
 export function FiscalPendientesButton({ online, onOpen }: Props) {
   const [open, setOpen] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { data, isFetching, isError } = useQuery({
     queryKey: ["fiscal-pendientes"],
@@ -39,6 +46,25 @@ export function FiscalPendientesButton({ online, onOpen }: Props) {
     refetchInterval: 30_000,
   });
   const items = data?.pendientes ?? [];
+
+  async function eliminar(ventaId: number) {
+    const ok = window.confirm(
+      `¿Eliminar la venta #${ventaId}? Se anula el cobro y se devuelve el stock. Esta venta no tiene factura de ARCA.`,
+    );
+    if (!ok) return;
+    setDeletingId(ventaId);
+    setDeleteError(null);
+    try {
+      await deleteVentaSinFactura(ventaId);
+      await queryClient.invalidateQueries({ queryKey: ["fiscal-pendientes"] });
+      await queryClient.invalidateQueries({ queryKey: ["pos-productos"] });
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "No se pudo eliminar la venta");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   if (!online || (items.length === 0 && !open)) return null;
 
   return (
@@ -59,12 +85,14 @@ export function FiscalPendientesButton({ online, onOpen }: Props) {
             <DialogTitle className="text-silver-light">Ventas sin factura de ARCA</DialogTitle>
             <DialogDescription className="text-silver">
               La venta y el cobro ya quedaron registrados. Falta el comprobante fiscal.
+              Podés reintentar la factura o eliminar la venta.
               {isFetching ? " Actualizando…" : ""}
             </DialogDescription>
           </DialogHeader>
           {isError && (
             <p className="text-xs text-destructive">No se pudo cargar la lista.</p>
           )}
+          {deleteError && <p className="text-xs text-destructive">{deleteError}</p>}
           {items.length === 0 ? (
             <p className="text-sm text-silver">No hay comprobantes pendientes.</p>
           ) : (
@@ -80,16 +108,29 @@ export function FiscalPendientesButton({ online, onOpen }: Props) {
                       <p className="text-xs text-silver mt-1 break-words">{item.error_message}</p>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded border border-border px-2 py-1 text-xs text-primary"
-                    onClick={() => {
-                      setOpen(false);
-                      onOpen(item.venta_id, item);
-                    }}
-                  >
-                    {accion(item)}
-                  </button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={deletingId != null}
+                      className="rounded border border-border px-2 py-1 text-xs text-primary disabled:opacity-50"
+                      onClick={() => {
+                        setOpen(false);
+                        onOpen(item.venta_id, item);
+                      }}
+                    >
+                      {accion(item)}
+                    </button>
+                    {puedeEliminar(item) && (
+                      <button
+                        type="button"
+                        disabled={deletingId != null}
+                        className="rounded border border-destructive/50 px-2 py-1 text-xs text-destructive disabled:opacity-50"
+                        onClick={() => void eliminar(item.venta_id)}
+                      >
+                        {deletingId === item.venta_id ? "Eliminando…" : "Eliminar"}
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>

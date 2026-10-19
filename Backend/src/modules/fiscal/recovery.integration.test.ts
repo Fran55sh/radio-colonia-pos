@@ -6,10 +6,10 @@ import { pool } from "../../config/db.js";
 import { setArcaClientForTests } from "./arca-client.js";
 import { barridoConciliacion } from "./conciliacion.js";
 import { FakeArca } from "./fake-arca.js";
-import { reintentarComprobante, setPersistFailuresForTests } from "./service.js";
+import { eliminarVentaSinFactura, reintentarComprobante, setPersistFailuresForTests } from "./service.js";
 import { applyPosSchema, closePool } from "../../../test/apply-pos-schema.js";
 import { processSale } from "../pos/service.js";
-import { getComprobanteByVentaId, reservarIntento, resolverIntento } from "./repository.js";
+import { getComprobanteByVentaId, listarPendientesFiscales, reservarIntento, resolverIntento } from "./repository.js";
 
 const enabled = Boolean(process.env.TEST_DATABASE_URL);
 
@@ -361,5 +361,75 @@ describe.skipIf(!enabled)("recuperación fiscal", () => {
       pool.options.connectionTimeoutMillis = prevTimeout ?? 5_000;
       fake.setStickyFailure(null);
     }
+  });
+
+  it("elimina una venta sin factura, devuelve el stock y anula el cobro", async () => {
+    const sale = await ventaPendiente("eliminar-sin-cae");
+    const antes = await pool.query<{ stock: number }>(
+      `SELECT stock FROM product_variants WHERE sku = 'eliminar-sin-cae'`,
+    );
+    expect(antes.rows[0].stock).toBe(19);
+
+    await eliminarVentaSinFactura(sale.venta_id, "test");
+
+    const venta = await pool.query<{ estado: string }>(
+      `SELECT estado FROM pos_ventas WHERE id = $1`,
+      [sale.venta_id],
+    );
+    expect(venta.rows[0].estado).toBe("anulada");
+    expect((await getComprobanteByVentaId(sale.venta_id))?.estado).toBe("anulado");
+    const stock = await pool.query<{ stock: number }>(
+      `SELECT stock FROM product_variants WHERE sku = 'eliminar-sin-cae'`,
+    );
+    expect(stock.rows[0].stock).toBe(20);
+    const caja = await pool.query<{ estado: string }>(
+      `SELECT estado FROM pos_caja_movimientos WHERE source_type = 'SALE' AND source_id = $1`,
+      [String(sale.venta_id)],
+    );
+    expect(caja.rows[0]?.estado).toBe("anulado");
+    const iva = await pool.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM pos_iva_registro WHERE referencia_tipo = 'pos_venta' AND referencia_id = $1`,
+      [sale.venta_id],
+    );
+    expect(iva.rows[0].n).toBe(0);
+    const pendientes = await listarPendientesFiscales();
+    expect(pendientes.find((item) => item.venta_id === sale.venta_id)).toBeUndefined();
+
+    await eliminarVentaSinFactura(sale.venta_id, "test");
+    const stockOtraVez = await pool.query<{ stock: number }>(
+      `SELECT stock FROM product_variants WHERE sku = 'eliminar-sin-cae'`,
+    );
+    expect(stockOtraVez.rows[0].stock).toBe(20);
+
+    await expect(processSale({
+      client_sale_id: "eliminar-sin-cae",
+      medio_pago: "Efectivo",
+      lineas: [{ codigo_interno: "eliminar-sin-cae", cantidad: 1 }],
+      caja_sesion_id: cajaId,
+    }, { skipFiscal: true })).rejects.toMatchObject({ code: "VENTA_ANULADA" });
+  });
+
+  it("no elimina una venta facturada ni una sin confirmar con ARCA", async () => {
+    const facturada = await ventaPendiente("eliminar-con-cae");
+    await pool.query(
+      `UPDATE pos_comprobantes_fiscales SET estado = 'emitido', cae = '12345678901234' WHERE venta_id = $1`,
+      [facturada.venta_id],
+    );
+    await expect(eliminarVentaSinFactura(facturada.venta_id, "test")).rejects.toMatchObject({
+      code: "VENTA_FACTURADA",
+    });
+    const stockFacturada = await pool.query<{ stock: number }>(
+      `SELECT stock FROM product_variants WHERE sku = 'eliminar-con-cae'`,
+    );
+    expect(stockFacturada.rows[0].stock).toBe(19);
+
+    const enVuelo = await ventaPendiente("eliminar-en-vuelo");
+    await pool.query(
+      `UPDATE pos_comprobantes_fiscales SET estado = 'desconocido' WHERE venta_id = $1`,
+      [enVuelo.venta_id],
+    );
+    await expect(eliminarVentaSinFactura(enVuelo.venta_id, "test")).rejects.toMatchObject({
+      code: "VENTA_SIN_CONFIRMAR",
+    });
   });
 });

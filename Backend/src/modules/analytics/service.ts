@@ -58,6 +58,7 @@ export async function rentabilidadEstimada(dias = 30) {
      FROM pos_lineas_venta lv
      JOIN pos_ventas v ON v.id = lv.venta_id
      WHERE v.created_at >= NOW() - ($1 || ' days')::interval
+       AND v.estado = 'completada'
      GROUP BY lv.sku_snapshot, lv.name_snapshot
      ORDER BY margen_estimado DESC
      LIMIT 20`,

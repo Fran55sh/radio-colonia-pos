@@ -1,11 +1,12 @@
 import type { FiscalEstado } from "./types.js";
 
 const PUEDE_ENVIAR: ReadonlySet<FiscalEstado> = new Set(["pendiente", "rechazado", "error"]);
+const PUEDE_ELIMINAR: ReadonlySet<FiscalEstado> = new Set(["pendiente", "rechazado", "error"]);
 
 const TRANSICIONES: Record<FiscalEstado, readonly FiscalEstado[]> = {
-  pendiente: ["enviando", "error"],
-  rechazado: ["enviando"],
-  error: ["enviando"],
+  pendiente: ["enviando", "error", "anulado"],
+  rechazado: ["enviando", "anulado"],
+  error: ["enviando", "anulado"],
   enviando: ["emitido", "rechazado", "desconocido", "error"],
   desconocido: ["emitido", "rechazado"],
   emitido: [],
@@ -23,6 +24,11 @@ export function transicionPermitida(desde: FiscalEstado, hacia: FiscalEstado): b
 
 export function puedeReintentar(estado: FiscalEstado, cae: string | null): boolean {
   return !cae && puedeEnviarAArca(estado);
+}
+
+/** Venta cobrada sin CAE y sin un envío a ARCA todavía sin confirmar. */
+export function puedeEliminarSinFactura(estado: FiscalEstado, cae: string | null): boolean {
+  return !cae && PUEDE_ELIMINAR.has(estado);
 }
 
 export function requiereConciliacion(estado: FiscalEstado): boolean {

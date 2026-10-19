@@ -2,8 +2,9 @@ import type { FastifyInstance } from "fastify";
 import { getArcaConfig, getArcaDiagnostics, isArcaConfigured } from "../../config/arca.js";
 import { env } from "../../config/env.js";
 import { AppError } from "../../middleware/errors.js";
+import { actorLabel } from "../caja/service.js";
 import { getArcaClient } from "./arca-client.js";
-import { getFiscalStatus, reintentarComprobante } from "./service.js";
+import { eliminarVentaSinFactura, getFiscalStatus, reintentarComprobante } from "./service.js";
 import { listarPendientesFiscales } from "./repository.js";
 
 export async function fiscalRoutes(app: FastifyInstance) {
@@ -22,6 +23,16 @@ export async function fiscalRoutes(app: FastifyInstance) {
   app.get("/pendientes", async (_request, reply) => {
     const pendientes = await listarPendientesFiscales();
     return reply.send({ pendientes });
+  });
+
+  app.post("/ventas/:ventaId/eliminar", async (request, reply) => {
+    const { ventaId } = request.params as { ventaId: string };
+    const id = Number(ventaId);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new AppError(400, "VALIDATION_ERROR", "Venta inválida");
+    }
+    await eliminarVentaSinFactura(id, actorLabel(request.authContext));
+    return reply.send({ ok: true, venta_id: id });
   });
 
   app.post("/ventas/:ventaId/reintentar", async (request, reply) => {

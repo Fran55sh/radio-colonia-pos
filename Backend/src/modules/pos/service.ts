@@ -64,14 +64,16 @@ async function findVentaByClientSaleId(
   total: number;
   caja_sesion_id: number | null;
   medio_pago: string;
+  estado: string;
 } | null> {
   const dup = await pool.query<{
     id: number;
     total: string;
     caja_sesion_id: number | null;
     medio_pago: string;
+    estado: string;
   }>(
-    `SELECT id, total, caja_sesion_id, medio_pago FROM pos_ventas WHERE client_sale_id = $1`,
+    `SELECT id, total, caja_sesion_id, medio_pago, estado FROM pos_ventas WHERE client_sale_id = $1`,
     [clientSaleId],
   );
   if (dup.rows.length === 0) return null;
@@ -80,6 +82,7 @@ async function findVentaByClientSaleId(
     total: Number(dup.rows[0].total),
     caja_sesion_id: dup.rows[0].caja_sesion_id,
     medio_pago: dup.rows[0].medio_pago,
+    estado: dup.rows[0].estado,
   };
 }
 
@@ -363,6 +366,7 @@ function fiscalPorFalloPosterior(err: unknown): ComprobanteFiscalResponse {
     error_message: message,
     ambiente: "",
     puede_reintentar: true,
+    puede_eliminar: true,
     requiere_conciliacion: false,
     imp_total_enviado: null,
     intento: null,
@@ -414,6 +418,13 @@ export async function processSale(
 
   if (input.client_sale_id) {
     const existing = await findVentaByClientSaleId(input.client_sale_id);
+    if (existing?.estado === "anulada") {
+      throw new AppError(
+        409,
+        "VENTA_ANULADA",
+        "Esa venta fue eliminada. Si corresponde, cobrala de nuevo.",
+      );
+    }
     if (existing) {
       let cajaMovimientoId: number | undefined;
       if (existing.caja_sesion_id != null) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   puedeEnviarAArca,
+  puedeEliminarSinFactura,
   puedeReintentar,
   requiereConciliacion,
   transicionPermitida,
@@ -34,5 +35,16 @@ describe("máquina de estados fiscal", () => {
     expect(puedeReintentar("error", "123")).toBe(false);
     expect(requiereConciliacion("desconocido")).toBe(true);
     expect(requiereConciliacion("rechazado")).toBe(false);
+  });
+
+  it("permite eliminar solo ventas sin CAE que no están en vuelo", () => {
+    expect(puedeEliminarSinFactura("pendiente", null)).toBe(true);
+    expect(puedeEliminarSinFactura("error", null)).toBe(true);
+    expect(puedeEliminarSinFactura("rechazado", null)).toBe(true);
+    expect(puedeEliminarSinFactura("error", "123")).toBe(false);
+    expect(puedeEliminarSinFactura("enviando", null)).toBe(false);
+    expect(puedeEliminarSinFactura("desconocido", null)).toBe(false);
+    expect(transicionPermitida("pendiente", "anulado")).toBe(true);
+    expect(transicionPermitida("enviando", "anulado")).toBe(false);
   });
 });
