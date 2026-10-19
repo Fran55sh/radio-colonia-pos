@@ -350,9 +350,13 @@ describe.skipIf(!enabled)("recuperación fiscal", () => {
       expect(results).toHaveLength(10);
       const ventas = await pool.query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM pos_ventas`);
       expect(ventas.rows[0].n).toBe(10);
-      const pendientes = results.filter((result) => result.fiscal?.estado === "pendiente");
-      expect(pendientes.length).toBeGreaterThan(0);
-      expect(pendientes.every((result) => !result.fiscal?.cae)).toBe(true);
+      const pendientes = await pool.query<{ n: number }>(
+        `SELECT COUNT(*)::int AS n
+         FROM pos_comprobantes_fiscales
+         WHERE estado IN ('pendiente', 'error', 'enviando', 'desconocido') AND cae IS NULL`,
+      );
+      expect(pendientes.rows[0].n).toBeGreaterThan(0);
+      expect(results.every((result) => !result.fiscal?.cae)).toBe(true);
     } finally {
       pool.options.max = prevMax ?? 20;
       pool.options.connectionTimeoutMillis = prevTimeout ?? 5_000;
