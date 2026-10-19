@@ -9,6 +9,7 @@ import { CashSessionBanner } from "@/components/pos/CashSessionBanner";
 import { CloseRegisterDialog } from "@/components/pos/CloseRegisterDialog";
 import { FiscalResultDialog } from "@/components/pos/FiscalResultDialog";
 import { FiscalPendientesButton } from "@/components/pos/FiscalPendientesButton";
+import { SalesHistorySheet } from "@/components/pos/SalesHistorySheet";
 import { OpenRegisterDialog } from "@/components/pos/OpenRegisterDialog";
 import { PosClock } from "@/components/pos/PosClock";
 import {
@@ -128,6 +129,7 @@ function POS() {
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [selectedCliente, setSelectedCliente] = useState<Cliente | null>(null);
   const [fiscalDialogOpen, setFiscalDialogOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [lastFiscal, setLastFiscal] = useState<FiscalResult | null>(null);
   const [lastVentaId, setLastVentaId] = useState(0);
   const [lastSaleTotal, setLastSaleTotal] = useState(0);
@@ -797,6 +799,13 @@ function POS() {
             <RefreshCw className={`size-3.5 ${isLoading ? "animate-spin" : ""}`} />
           </button>
 
+          <button
+            type="button"
+            onClick={() => setHistoryOpen(true)}
+            className="px-3 py-1.5 rounded-md border border-border text-xs text-silver hover:text-silver-light"
+          >
+            Ventas
+          </button>
           <FiscalPendientesButton
             online={online}
             onOpen={(ventaId, fiscal) => {
@@ -880,6 +889,17 @@ function POS() {
                     Cola offline: {pendingOffline}
                   </div>
                 )}
+
+                <Button
+                  variant="outline"
+                  className="justify-start border-border text-silver-light gap-2"
+                  onClick={() => {
+                    setHistoryOpen(true);
+                    setMenuOpen(false);
+                  }}
+                >
+                  Ventas
+                </Button>
 
                 <Button
                   variant="outline"
@@ -1307,6 +1327,8 @@ function POS() {
           {toast}
         </div>
       )}
+
+      <SalesHistorySheet open={historyOpen} onOpenChange={setHistoryOpen} />
 
       <FiscalResultDialog
         open={fiscalDialogOpen}

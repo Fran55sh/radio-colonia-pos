@@ -4,10 +4,37 @@ import { env } from "../../config/env.js";
 import { AppError } from "../../middleware/errors.js";
 import { actorLabel } from "../caja/service.js";
 import { getArcaClient } from "./arca-client.js";
+import {
+  crearEnlaceDeVenta,
+  enviarEmailDeVenta,
+  metaDistribucion,
+  parseVentaId,
+  responderPdf,
+} from "./factura-servicio.js";
 import { eliminarVentaSinFactura, getFiscalStatus, reintentarComprobante } from "./service.js";
 import { listarPendientesFiscales } from "./repository.js";
 
 export async function fiscalRoutes(app: FastifyInstance) {
+  app.get("/ventas/:ventaId/pdf", async (request, reply) => {
+    const { ventaId } = request.params as { ventaId: string };
+    await responderPdf(parseVentaId(ventaId), reply);
+  });
+
+  app.get("/ventas/:ventaId/distribucion", async (request, reply) => {
+    const { ventaId } = request.params as { ventaId: string };
+    return reply.send(await metaDistribucion(parseVentaId(ventaId)));
+  });
+
+  app.post("/ventas/:ventaId/email", async (request, reply) => {
+    const { ventaId } = request.params as { ventaId: string };
+    return reply.send(await enviarEmailDeVenta(parseVentaId(ventaId), request.body));
+  });
+
+  app.post("/ventas/:ventaId/enlace", async (request, reply) => {
+    const { ventaId } = request.params as { ventaId: string };
+    return reply.send(await crearEnlaceDeVenta(parseVentaId(ventaId), request));
+  });
+
   app.get("/ventas/:ventaId", async (request, reply) => {
     const { ventaId } = request.params as { ventaId: string };
     const fiscal = await getFiscalStatus(Number(ventaId));

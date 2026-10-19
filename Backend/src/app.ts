@@ -18,6 +18,7 @@ import { authRoutes } from "./modules/auth/routes.js";
 import { isAuthConfigured } from "./modules/auth/service.js";
 import { clientesRoutes } from "./modules/clientes/routes.js";
 import { contabilidadRoutes } from "./modules/contabilidad/routes.js";
+import { responderPdfPublico } from "./modules/fiscal/factura-servicio.js";
 import { fiscalRoutes } from "./modules/fiscal/routes.js";
 import { cajaRoutes } from "./modules/caja/routes.js";
 import { posRoutes } from "./modules/pos/routes.js";
@@ -50,6 +51,7 @@ export async function buildApp() {
   await app.register(cors, {
     origin: env.CORS_ORIGIN.split(",").map((o) => o.trim()),
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    exposedHeaders: ["Content-Disposition"],
   });
 
   await app.register(rateLimit, {
@@ -77,6 +79,10 @@ export async function buildApp() {
     async (api) => {
       await api.register(authRoutes, { prefix: "/auth" });
       await api.register(posRoutes, { prefix: "/pos" });
+      api.get("/fiscal/publico/:token", async (request, reply) => {
+        const { token } = request.params as { token: string };
+        await responderPdfPublico(token, reply);
+      });
       await api.register(
         async (scoped) => {
           scoped.addHook("preHandler", requireRole("caja"));

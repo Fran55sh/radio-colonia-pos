@@ -126,6 +126,24 @@ describe("resolverComprobante", () => {
     expect(r.docNro).toBe(0);
   });
 
+  it("un emisor RI no resuelve Factura C", () => {
+    const casos: Array<Partial<ClienteFiscal> | null> = [
+      null,
+      { condicion_iva_receptor_id: CONDICION_IVA_CF },
+      { condicion_iva_receptor_id: CONDICION_IVA_EXENTO, documento: "20123456786" },
+      { condicion_iva_receptor_id: CONDICION_IVA_RI, documento: "20123456786" },
+      { condicion_iva_receptor_id: CONDICION_IVA_MONOTRIBUTO, documento: "20123456786" },
+      { condicion_iva_receptor_id: CONDICION_IVA_NO_CATEGORIZADO, documento: "20123456786" },
+      { condicion_iva_receptor_id: CONDICION_IVA_MONOTRIBUTO_SOCIAL, documento: "20123456786" },
+      { condicion_iva_receptor_id: CONDICION_IVA_MONOTRIBUTO_TIP, documento: "20123456786" },
+    ];
+    for (const parcial of casos) {
+      const resuelto = resolverComprobante(parcial ? cliente(parcial) : null);
+      expect(resuelto.cbteTipo).not.toBe(CbteTipo.FACTURA_C);
+      expect([CbteTipo.FACTURA_A, CbteTipo.FACTURA_B]).toContain(resuelto.cbteTipo);
+    }
+  });
+
   it("Monotributo sin CUIT → error CLIENTE_SIN_CUIT", () => {
     const act = () =>
       resolverComprobante(

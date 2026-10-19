@@ -30,6 +30,9 @@ function isPublicPath(method: string, url: string): boolean {
   if (method === "GET" && path === "/api/v1/auth/config") {
     return true;
   }
+  if (method === "GET" && /^\/api\/v1\/fiscal\/publico\/[^/]+$/.test(path)) {
+    return true;
+  }
   if (method === "OPTIONS") return true;
   return false;
 }
