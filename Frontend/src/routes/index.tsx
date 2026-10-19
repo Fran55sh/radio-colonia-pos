@@ -132,6 +132,7 @@ function POS() {
   const [lastVentaId, setLastVentaId] = useState(0);
   const [lastSaleTotal, setLastSaleTotal] = useState(0);
   const [pendingSale, setPendingSale] = useState<PendingSale | null>(null);
+  const [pendingNotice, setPendingNotice] = useState<string | null>(null);
   const [mobileStep, setMobileStep] = useState<MobileStep>("precios");
   const [menuOpen, setMenuOpen] = useState(false);
   const [isLg, setIsLg] = useState(() =>
@@ -235,6 +236,7 @@ function POS() {
       if (pending && syncedIds.includes(pending.client_sale_id)) {
         clearPendingSale();
         setPendingSale(null);
+        setPendingNotice(null);
       }
       if (result.procesadas > 0) {
         flash(`${result.procesadas} venta(s) offline sincronizada(s)`);
@@ -458,7 +460,7 @@ function POS() {
       const stored = loadPendingSale();
       if (stored && stored.cart_fingerprint !== fingerprint) {
         setPendingSale(stored);
-        flash("Hay una venta anterior sin confirmar. Verificá o descartá antes de cobrar otra.");
+        setPendingNotice("El carrito cambió. Primero verificá o descartá la venta anterior.");
         return;
       }
       const clientSaleId = stored?.client_sale_id ?? generateClientSaleId();
@@ -534,6 +536,7 @@ function POS() {
           if (!tryEnqueueOffline()) return;
           clearPendingSale();
           setPendingSale(null);
+          setPendingNotice(null);
           flash(`Venta guardada offline: ${method} — ${formatARS(saleTotal)}`);
           resetAfterSale();
           return;
@@ -542,6 +545,7 @@ function POS() {
         const result = await createVenta(payload);
         clearPendingSale();
         setPendingSale(null);
+        setPendingNotice(null);
         flash(`Venta #${result.venta_id}: ${method} — ${formatARS(result.total)}`);
         if (result.fiscal) {
           setLastFiscal(result.fiscal);
@@ -556,11 +560,11 @@ function POS() {
           const rejected = { ...pending, allow_discard: true };
           savePendingSale(rejected);
           setPendingSale(rejected);
-          flash(err.message);
+          setPendingNotice(err.message);
           if (err.message.toLowerCase().includes("stock")) void refetch();
           return;
         }
-        flash("No sabemos si la venta se registró. Tocá Verificar.");
+        setPendingNotice("No sabemos si la venta se registró. Tocá Verificar.");
         if (!online) {
           if (!tryEnqueueOffline()) return;
           flash(`Venta en cola offline: ${method}`);
@@ -593,6 +597,7 @@ function POS() {
       const result = await createVenta(pending.payload);
       clearPendingSale();
       setPendingSale(null);
+      setPendingNotice(null);
       flash(`Venta #${result.venta_id} confirmada — ${formatARS(result.total)}`);
       if (result.fiscal) {
         setLastFiscal(result.fiscal);
@@ -619,10 +624,14 @@ function POS() {
         const rejected = { ...pending, allow_discard: true };
         savePendingSale(rejected);
         setPendingSale(rejected);
-        flash(err.message);
+        setPendingNotice(err.message);
         return;
       }
-      flash("No sabemos si la venta se registró. Tocá Verificar.");
+      setPendingNotice(
+        err instanceof Error
+          ? `${err.message}. Si no se registró, podés descartar el aviso y cobrar de nuevo.`
+          : "No sabemos si la venta se registró. Tocá Verificar.",
+      );
     } finally {
       setProcessing(false);
     }
@@ -630,9 +639,14 @@ function POS() {
 
   const descartarPending = useCallback(() => {
     const pending = loadPendingSale();
-    if (!pending?.allow_discard) return;
+    if (!pending) return;
+    const ok = window.confirm(
+      "¿Descartar el aviso de la venta anterior? Si esa venta sí se registró, no se borra: sigue en la caja. Solo te deja cobrar otra.",
+    );
+    if (!ok) return;
     clearPendingSale();
     setPendingSale(null);
+    setPendingNotice(null);
   }, []);
 
   useEffect(() => {
@@ -903,25 +917,41 @@ function POS() {
       {pendingSale && (
         <div
           role="status"
-          className="shrink-0 flex flex-wrap items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
+          className="shrink-0 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100 space-y-2"
         >
-          <span>Hay una venta anterior sin confirmar</span>
-          <button
-            type="button"
-            className="rounded border border-amber-200/40 px-2 py-1 font-semibold"
-            disabled={processing}
-            onClick={() => void verificarPending()}
-          >
-            Verificar
-          </button>
-          <button
-            type="button"
-            className="rounded border border-amber-200/40 px-2 py-1 font-semibold disabled:opacity-40"
-            disabled={!pendingSale.allow_discard || processing}
-            onClick={descartarPending}
-          >
-            Descartar
-          </button>
+          <div className="font-semibold">Hay una venta anterior sin confirmar</div>
+          <div className="text-amber-50/90">
+            {pendingSale.payload.medio_pago} ·{" "}
+            {pendingSale.payload.lineas
+              .map((line) => `${line.cantidad} × ${line.codigo_interno}`)
+              .join(", ")}
+            {" · "}
+            {formatARS(
+              pendingSale.payload.lineas.reduce(
+                (sum, line) => sum + line.cantidad * (line.precio_unitario ?? 0),
+                0,
+              ),
+            )}
+          </div>
+          {pendingNotice && <p>{pendingNotice}</p>}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded border border-amber-200/60 bg-amber-200/10 px-2 py-1 font-semibold"
+              disabled={processing}
+              onClick={() => void verificarPending()}
+            >
+              {processing ? "Verificando…" : "Verificar"}
+            </button>
+            <button
+              type="button"
+              className="rounded border border-amber-200/60 px-2 py-1 font-semibold"
+              disabled={processing}
+              onClick={descartarPending}
+            >
+              Descartar aviso
+            </button>
+          </div>
         </div>
       )}
 
