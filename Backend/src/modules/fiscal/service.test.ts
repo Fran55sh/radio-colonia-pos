@@ -50,7 +50,8 @@ vi.mock("./resolver.js", () => ({
   resolverComprobante,
 }));
 
-import { emitirComprobanteVenta, maybeEmitirDespuesDeVenta } from "./service.js";
+import { emitirComprobanteVenta, maybeEmitirDespuesDeVenta, registrarPendienteVenta } from "./service.js";
+import type { DbClient } from "../../config/db.js";
 
 function caeResponse(cae: string, nro: number) {
   return {
@@ -118,6 +119,33 @@ describe("emitirComprobanteVenta idempotency", () => {
       condicionIva: 5,
       label: "Factura B",
     });
+  });
+
+  it("guarda el pendiente usando la conexión de venta sin llamar a ARCA", async () => {
+    const db = { query: vi.fn() } as unknown as DbClient;
+    ensureComprobantePendiente.mockResolvedValue({ estado: "pendiente" });
+    await registrarPendienteVenta(10, db);
+    expect(loadVentaFiscalContext).toHaveBeenCalledWith(10, db);
+    expect(ensureComprobantePendiente).toHaveBeenCalledWith(10, expect.objectContaining({
+      ambiente: "dev", punto_venta: 1, cbte_tipo: 6, total: 121,
+    }), db);
+    expect(getArcaClient).not.toHaveBeenCalled();
+    expect(withVentaFiscalLock).not.toHaveBeenCalled();
+  });
+
+  it("propaga el fallo de persistencia para que la transacción de venta haga rollback", async () => {
+    const db = { query: vi.fn() } as unknown as DbClient;
+    const failure = new Error("falló guardar pendiente");
+    ensureComprobantePendiente.mockRejectedValueOnce(failure);
+    await expect(registrarPendienteVenta(10, db)).rejects.toBe(failure);
+    expect(getArcaClient).not.toHaveBeenCalled();
+  });
+
+  it("no registra obligación fiscal si ARCA está deshabilitado", async () => {
+    getArcaConfig.mockReturnValue(null);
+    await registrarPendienteVenta(10, { query: vi.fn() } as unknown as DbClient);
+    expect(loadVentaFiscalContext).not.toHaveBeenCalled();
+    expect(ensureComprobantePendiente).not.toHaveBeenCalled();
   });
 
   it("does not call WSFE when already emitido with CAE", async () => {

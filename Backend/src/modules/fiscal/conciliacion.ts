@@ -146,10 +146,17 @@ export async function barridoConciliacion(opts?: { minAgeMs?: number }): Promise
     if (!locked) return 0;
     const ageMs = opts?.minAgeMs ?? 120_000;
     const rows = await client.query<{ venta_id: number }>(
-      `SELECT DISTINCT venta_id
-       FROM pos_comprobantes_fiscales_intentos
-       WHERE estado IN ('enviando', 'desconocido')
-         AND created_at < NOW() - ($1::text || ' milliseconds')::interval
+      `SELECT venta_id FROM (
+         SELECT venta_id
+         FROM pos_comprobantes_fiscales_intentos
+         WHERE estado IN ('enviando', 'desconocido')
+           AND created_at < NOW() - ($1::text || ' milliseconds')::interval
+         UNION
+         SELECT venta_id
+         FROM pos_comprobantes_fiscales
+         WHERE estado = 'pendiente' AND cae IS NULL
+           AND created_at < NOW() - ($1::text || ' milliseconds')::interval
+       ) AS recuperables
        ORDER BY venta_id
        LIMIT 20`,
       [String(ageMs)],

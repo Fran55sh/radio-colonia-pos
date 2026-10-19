@@ -23,7 +23,7 @@ import {
 } from "../caja/service.js";
 import { getClienteFiscalById } from "../clientes/service.js";
 import { isArcaConfigured } from "../../config/arca.js";
-import { getFiscalStatus, maybeEmitirDespuesDeVenta } from "../fiscal/service.js";
+import { getFiscalStatus, maybeEmitirDespuesDeVenta, registrarPendienteVenta } from "../fiscal/service.js";
 import type { ComprobanteFiscalResponse } from "../fiscal/types.js";
 import type { CreateSaleInput } from "./schemas.js";
 
@@ -264,6 +264,7 @@ export async function listProductosCaja(client: DbClient): Promise<ProductoCaja[
 }
 
 export type ProcessSaleOpts = {
+  /** Difiere el envío; el pendiente fiscal se guarda igualmente con la venta. */
   skipFiscal?: boolean;
   authContext?: AuthContext;
 };
@@ -474,6 +475,7 @@ export async function processSale(
           });
           movId = ensured.row.id;
         }
+        await registrarPendienteVenta(sale.ventaId, client);
         return {
           ventaId: sale.ventaId,
           totalVenta: sale.totalVenta,
