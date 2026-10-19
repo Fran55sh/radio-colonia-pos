@@ -2,7 +2,7 @@ import { getArcaConfig, isArcaConfigured } from "../../config/arca.js";
 import { calcularImportesVenta, moneyFromCents } from "../../lib/fiscal-importes.js";
 import { AppError } from "../../middleware/errors.js";
 import { getArcaClient } from "./arca-client.js";
-import { pool } from "../../config/db.js";
+import type { DbClient } from "../../config/db.js";
 import { cbteTipoPorCondicionIva } from "./cbte-tipo.js";
 import { CONDICION_IVA_CF } from "./iva-condiciones.js";
 import { buildFECAEDetRequest, buildQrUrl, parseFECAESolicitar } from "./mappers.js";
@@ -19,6 +19,7 @@ import {
   rowToFiscalResponse,
   withVentaFiscalLock,
   type FiscalSession,
+  type Queryable,
 } from "./repository.js";
 import { conciliarComprobante } from "./conciliacion.js";
 import { ArcaAuthError, ArcaSoapError } from "@ramiidv/arca-facturacion";
@@ -82,22 +83,23 @@ export async function emitirComprobanteVenta(
   });
 }
 
-async function ejecutarEmision(
+/** Persiste el trabajo fiscal en la misma transacción que registra la venta.
+ * No llama a ARCA. skipFiscal sólo difiere el envío, no esta obligación.
+ */
+export async function registrarPendienteVenta(ventaId: number, db: DbClient): Promise<void> {
+  const config = getArcaConfig();
+  if (!config?.enabled) return;
+  const ctx = await loadVentaFiscalContext(ventaId, db);
+  if (!ctx) throw new AppError(404, "VENTA_NOT_FOUND", "Venta no encontrada");
+  await prepararComprobante(ventaId, ctx, config, db);
+}
+
+async function prepararComprobante(
   ventaId: number,
   ctx: NonNullable<Awaited<ReturnType<typeof loadVentaFiscalContext>>>,
   arcaConfig: NonNullable<ReturnType<typeof getArcaConfig>>,
-  session?: FiscalSession,
-): Promise<ComprobanteFiscalResponse> {
-  const arca = getArcaClient();
-  if (!arca) {
-    throw new AppError(
-      503,
-      "ARCA_NOT_CONFIGURED",
-      "Facturación ARCA habilitada pero faltan certificados o configuración",
-    );
-  }
-  const db = session?.client;
-
+  db?: Queryable,
+) {
   let resuelto;
   try {
     resuelto = resolverComprobante(ctx.cliente);
@@ -119,7 +121,7 @@ async function ejecutarEmision(
     }, db);
     await marcarComprobanteError(ventaId, err.code, err.message, err, db);
     const row = await getComprobanteByVentaId(ventaId, db);
-    return rowToFiscalResponse(row!);
+    return { pendiente: row!, resuelto: null };
   }
 
   const pendiente = await ensureComprobantePendiente(ventaId, {
@@ -135,6 +137,27 @@ async function ejecutarEmision(
     exento: ctx.exento,
     total: ctx.total,
   }, db);
+
+  return { pendiente, resuelto };
+}
+
+async function ejecutarEmision(
+  ventaId: number,
+  ctx: NonNullable<Awaited<ReturnType<typeof loadVentaFiscalContext>>>,
+  arcaConfig: NonNullable<ReturnType<typeof getArcaConfig>>,
+  session?: FiscalSession,
+): Promise<ComprobanteFiscalResponse> {
+  const arca = getArcaClient();
+  if (!arca) {
+    throw new AppError(
+      503,
+      "ARCA_NOT_CONFIGURED",
+      "Facturación ARCA habilitada pero faltan certificados o configuración",
+    );
+  }
+  const db = session?.client;
+  const { pendiente, resuelto } = await prepararComprobante(ventaId, ctx, arcaConfig, db);
+  if (!resuelto) return rowToFiscalResponse(pendiente);
 
   let importes;
   try {

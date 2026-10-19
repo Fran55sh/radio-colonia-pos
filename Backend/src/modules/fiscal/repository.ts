@@ -182,6 +182,19 @@ export class FiscalLockBusy extends Error {
 
 export type Queryable = Pick<DbClient, "query">;
 
+/** Transacción corta sobre la conexión que ya posee los locks fiscales. */
+async function withFiscalTransaction<T>(db: Queryable, run: () => Promise<T>): Promise<T> {
+  await db.query("BEGIN");
+  try {
+    const result = await run();
+    await db.query("COMMIT");
+    return result;
+  } catch (err) {
+    await db.query("ROLLBACK");
+    throw err;
+  }
+}
+
 export type FiscalSession = {
   client: Queryable;
   lockPv: (ambiente: string, puntoVenta: number, cbteTipo: number) => Promise<void>;
@@ -380,67 +393,69 @@ export async function reservarIntento(
     request_payload: unknown;
   },
 ): Promise<{ id: number; nro_intento: number }> {
-  const seq = await db.query<{ n: number }>(
-    `SELECT COALESCE(MAX(nro_intento), 0) + 1 AS n
-     FROM pos_comprobantes_fiscales_intentos WHERE comprobante_id = $1`,
-    [data.comprobante_id],
-  );
-  const nroIntento = seq.rows[0]?.n ?? 1;
-  const inserted = await db.query<{ id: number; nro_intento: number }>(
-    `INSERT INTO pos_comprobantes_fiscales_intentos (
-       comprobante_id, venta_id, nro_intento, estado, ambiente, emisor_cuit, punto_venta, cbte_tipo,
-       cbte_nro, fecha_cbte, doc_tipo, doc_nro, condicion_iva_receptor_id,
-       imp_total, imp_neto, imp_iva, imp_op_ex, iva_detalle, request_payload, sent_at
-     ) VALUES (
-       $1, $2, $3, 'enviando', $4, $5, $6, $7,
-       $8, $9::date, $10, $11, $12,
-       $13, $14, $15, $16, $17::jsonb, $18::jsonb, NOW()
-     ) RETURNING id, nro_intento`,
-    [
-      data.comprobante_id,
-      data.venta_id,
-      nroIntento,
-      data.ambiente,
-      data.emisor_cuit,
-      data.punto_venta,
-      data.cbte_tipo,
-      data.cbte_nro,
-      data.fecha_cbte,
-      data.doc_tipo,
-      data.doc_nro,
-      data.condicion_iva_receptor_id,
-      data.imp_total,
-      data.imp_neto,
-      data.imp_iva,
-      data.imp_op_ex,
-      JSON.stringify(data.iva_detalle),
-      JSON.stringify(data.request_payload),
-    ],
-  );
-  const updated = await db.query(
-    `UPDATE pos_comprobantes_fiscales SET
-       estado = 'enviando',
-       intento_actual_id = $2,
-       cbte_tipo = $3,
-       doc_tipo = $4,
-       doc_nro = $5,
-       condicion_iva_receptor_id = $6,
-       updated_at = NOW()
-     WHERE id = $1 AND cae IS NULL AND estado = ANY($7::text[])`,
-    [
-      data.comprobante_id,
-      inserted.rows[0].id,
-      data.cbte_tipo,
-      data.doc_tipo,
-      data.doc_nro,
-      data.condicion_iva_receptor_id,
-      ["pendiente", "rechazado", "error"],
-    ],
-  );
-  if ((updated.rowCount ?? 0) === 0) {
-    throw new Error("No se pudo marcar el comprobante como enviando");
-  }
-  return inserted.rows[0];
+  return withFiscalTransaction(db, async () => {
+    const seq = await db.query<{ n: number }>(
+      `SELECT COALESCE(MAX(nro_intento), 0) + 1 AS n
+       FROM pos_comprobantes_fiscales_intentos WHERE comprobante_id = $1`,
+      [data.comprobante_id],
+    );
+    const nroIntento = seq.rows[0]?.n ?? 1;
+    const inserted = await db.query<{ id: number; nro_intento: number }>(
+      `INSERT INTO pos_comprobantes_fiscales_intentos (
+         comprobante_id, venta_id, nro_intento, estado, ambiente, emisor_cuit, punto_venta, cbte_tipo,
+         cbte_nro, fecha_cbte, doc_tipo, doc_nro, condicion_iva_receptor_id,
+         imp_total, imp_neto, imp_iva, imp_op_ex, iva_detalle, request_payload, sent_at
+       ) VALUES (
+         $1, $2, $3, 'enviando', $4, $5, $6, $7,
+         $8, $9::date, $10, $11, $12,
+         $13, $14, $15, $16, $17::jsonb, $18::jsonb, NOW()
+       ) RETURNING id, nro_intento`,
+      [
+        data.comprobante_id,
+        data.venta_id,
+        nroIntento,
+        data.ambiente,
+        data.emisor_cuit,
+        data.punto_venta,
+        data.cbte_tipo,
+        data.cbte_nro,
+        data.fecha_cbte,
+        data.doc_tipo,
+        data.doc_nro,
+        data.condicion_iva_receptor_id,
+        data.imp_total,
+        data.imp_neto,
+        data.imp_iva,
+        data.imp_op_ex,
+        JSON.stringify(data.iva_detalle),
+        JSON.stringify(data.request_payload),
+      ],
+    );
+    const updated = await db.query(
+      `UPDATE pos_comprobantes_fiscales SET
+         estado = 'enviando',
+         intento_actual_id = $2,
+         cbte_tipo = $3,
+         doc_tipo = $4,
+         doc_nro = $5,
+         condicion_iva_receptor_id = $6,
+         updated_at = NOW()
+       WHERE id = $1 AND cae IS NULL AND estado = ANY($7::text[])`,
+      [
+        data.comprobante_id,
+        inserted.rows[0].id,
+        data.cbte_tipo,
+        data.doc_tipo,
+        data.doc_nro,
+        data.condicion_iva_receptor_id,
+        ["pendiente", "rechazado", "error"],
+      ],
+    );
+    if ((updated.rowCount ?? 0) === 0) {
+      throw new Error("No se pudo marcar el comprobante como enviando");
+    }
+    return inserted.rows[0];
+  });
 }
 
 export async function resolverIntento(
@@ -458,36 +473,38 @@ export async function resolverIntento(
 ): Promise<void> {
   const intentoEstado = data.estado === "no_autorizado" ? "no_autorizado" : data.estado;
   const comprobanteEstado = intentoEstado === "no_autorizado" ? "rechazado" : data.estado;
-  await db.query(
-    `UPDATE pos_comprobantes_fiscales_intentos SET
-       estado = $2::varchar,
-       cae = COALESCE($3, cae),
-       cae_vencimiento = COALESCE($4::date, cae_vencimiento),
-       error_code = $5,
-       error_message = $6,
-       response_raw = COALESCE($7::jsonb, response_raw),
-       resolved_at = CASE WHEN $2::text IN ('enviando', 'desconocido') THEN resolved_at ELSE NOW() END
-     WHERE id = $1 AND estado IN ('enviando', 'desconocido')`,
-    [
-      data.intento_id,
-      intentoEstado,
-      data.cae ?? null,
-      data.cae_vencimiento ?? null,
-      data.error_code ?? null,
-      data.error_message ?? null,
-      data.response_raw == null ? null : JSON.stringify(data.response_raw),
-    ],
-  );
-  if (comprobanteEstado === "emitido") return;
-  await db.query(
-    `UPDATE pos_comprobantes_fiscales SET
-       estado = $2::varchar,
-       error_code = $3,
-       error_message = $4,
-       updated_at = NOW()
-     WHERE venta_id = $1 AND cae IS NULL AND estado <> 'emitido'`,
-    [data.venta_id, comprobanteEstado, data.error_code ?? null, data.error_message ?? null],
-  );
+  await withFiscalTransaction(db, async () => {
+    await db.query(
+      `UPDATE pos_comprobantes_fiscales_intentos SET
+         estado = $2::varchar,
+         cae = COALESCE($3, cae),
+         cae_vencimiento = COALESCE($4::date, cae_vencimiento),
+         error_code = $5,
+         error_message = $6,
+         response_raw = COALESCE($7::jsonb, response_raw),
+         resolved_at = CASE WHEN $2::text IN ('enviando', 'desconocido') THEN resolved_at ELSE NOW() END
+       WHERE id = $1 AND estado IN ('enviando', 'desconocido')`,
+      [
+        data.intento_id,
+        intentoEstado,
+        data.cae ?? null,
+        data.cae_vencimiento ?? null,
+        data.error_code ?? null,
+        data.error_message ?? null,
+        data.response_raw == null ? null : JSON.stringify(data.response_raw),
+      ],
+    );
+    if (comprobanteEstado === "emitido") return;
+    await db.query(
+      `UPDATE pos_comprobantes_fiscales SET
+         estado = $2::varchar,
+         error_code = $3,
+         error_message = $4,
+         updated_at = NOW()
+       WHERE venta_id = $1 AND cae IS NULL AND estado <> 'emitido'`,
+      [data.venta_id, comprobanteEstado, data.error_code ?? null, data.error_message ?? null],
+    );
+  });
 }
 
 export async function listarPendientesFiscales(): Promise<Array<ComprobanteFiscalResponse & { venta_id: number }>> {

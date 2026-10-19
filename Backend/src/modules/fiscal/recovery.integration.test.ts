@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setClockForTests } from "../../lib/fecha-ar.js";
-import { setArcaConfigForTests } from "../../config/arca.js";
+import { getArcaConfig, setArcaConfigForTests } from "../../config/arca.js";
 import { pool } from "../../config/db.js";
 import { setArcaClientForTests } from "./arca-client.js";
 import { barridoConciliacion } from "./conciliacion.js";
@@ -9,6 +9,7 @@ import { FakeArca } from "./fake-arca.js";
 import { reintentarComprobante, setPersistFailuresForTests } from "./service.js";
 import { applyPosSchema, closePool } from "../../../test/apply-pos-schema.js";
 import { processSale } from "../pos/service.js";
+import { getComprobanteByVentaId, reservarIntento, resolverIntento } from "./repository.js";
 
 const enabled = Boolean(process.env.TEST_DATABASE_URL);
 
@@ -91,6 +92,116 @@ describe.skipIf(!enabled)("recuperación fiscal", () => {
       caja_sesion_id: cajaId,
     });
   }
+
+  async function ventaPendiente(id: string) {
+    await seedSku(id, 100);
+    return processSale({
+      client_sale_id: id,
+      medio_pago: "Efectivo",
+      lineas: [{ codigo_interno: id, cantidad: 1 }],
+      caja_sesion_id: cajaId,
+    }, { skipFiscal: true });
+  }
+
+  async function datosIntento(ventaId: number) {
+    const comp = await getComprobanteByVentaId(ventaId);
+    return {
+      comprobante_id: comp!.id, venta_id: ventaId,
+      ambiente: "dev", emisor_cuit: "20111111112", punto_venta: 1, cbte_tipo: 6,
+      cbte_nro: 1, fecha_cbte: "2026-10-17", doc_tipo: 99, doc_nro: 0,
+      condicion_iva_receptor_id: 5, imp_total: 100, imp_neto: 82.64,
+      imp_iva: 17.36, imp_op_ex: 0, iva_detalle: [], request_payload: {},
+    };
+  }
+
+  it("revierte el intento si falla la actualización del comprobante y permite reintentar", async () => {
+    const sale = await ventaPendiente("atomic-reserva");
+    const data = await datosIntento(sale.venta_id);
+    const client = await pool.connect();
+    await pool.query(`ALTER TABLE pos_comprobantes_fiscales ADD CONSTRAINT test_reject_enviando CHECK (estado <> 'enviando') NOT VALID`);
+    try {
+      await expect(reservarIntento(client, data)).rejects.toMatchObject({ code: "23514" });
+      expect((await pool.query(`SELECT id FROM pos_comprobantes_fiscales_intentos`)).rowCount).toBe(0);
+      expect(await getComprobanteByVentaId(sale.venta_id)).toMatchObject({ estado: "pendiente", intento_actual_id: null });
+    } finally {
+      await pool.query(`ALTER TABLE pos_comprobantes_fiscales DROP CONSTRAINT test_reject_enviando`);
+      client.release();
+    }
+    expect((await reintentarComprobante(sale.venta_id))?.estado).toBe("emitido");
+    expect(fake.authorizations).toBe(1);
+  });
+
+  it("revierte también el INSERT cuando la reserva no puede cambiar el estado", async () => {
+    const sale = await ventaPendiente("atomic-no-update");
+    const data = await datosIntento(sale.venta_id);
+    await pool.query(`UPDATE pos_comprobantes_fiscales SET estado = 'anulado' WHERE venta_id = $1`, [sale.venta_id]);
+    const client = await pool.connect();
+    try {
+      await expect(reservarIntento(client, data)).rejects.toThrow("No se pudo marcar");
+      expect((await pool.query(`SELECT id FROM pos_comprobantes_fiscales_intentos`)).rowCount).toBe(0);
+    } finally {
+      client.release();
+    }
+  });
+
+  it("conserva ambos estados abiertos si falla resolverIntento y permite resolver luego", async () => {
+    const sale = await ventaPendiente("atomic-resolver");
+    const client = await pool.connect();
+    try {
+      const intento = await reservarIntento(client, await datosIntento(sale.venta_id));
+      const resolution = { intento_id: intento.id, venta_id: sale.venta_id, estado: "no_autorizado" as const };
+      await pool.query(`ALTER TABLE pos_comprobantes_fiscales ADD CONSTRAINT test_reject_rechazado CHECK (estado <> 'rechazado') NOT VALID`);
+      try {
+        await expect(resolverIntento(client, resolution)).rejects.toMatchObject({ code: "23514" });
+        expect(await getComprobanteByVentaId(sale.venta_id)).toMatchObject({ estado: "enviando", intento_estado: "enviando" });
+      } finally {
+        await pool.query(`ALTER TABLE pos_comprobantes_fiscales DROP CONSTRAINT test_reject_rechazado`);
+      }
+      await resolverIntento(client, resolution);
+      expect(await getComprobanteByVentaId(sale.venta_id)).toMatchObject({ estado: "rechazado", intento_estado: "no_autorizado" });
+    } finally {
+      client.release();
+    }
+  });
+
+  it("si no puede guardar el pendiente revierte venta, caja y stock", async () => {
+    await seedSku("atomic-venta", 100, 21, 5);
+    await pool.query(`ALTER TABLE pos_comprobantes_fiscales ADD CONSTRAINT test_reject_pendiente CHECK (estado <> 'pendiente') NOT VALID`);
+    try {
+      await expect(vender("atomic-venta", "atomic-venta")).rejects.toMatchObject({ code: "23514" });
+      for (const table of ["pos_ventas", "pos_caja_movimientos", "pos_lineas_venta", "pos_iva_registro", "pos_comprobantes_fiscales"]) {
+        expect((await pool.query(`SELECT COUNT(*)::int AS n FROM ${table}`)).rows[0].n).toBe(0);
+      }
+      expect((await pool.query(`SELECT stock FROM product_variants WHERE sku = 'atomic-venta'`)).rows[0].stock).toBe(5);
+      expect(fake.crearFacturaCalls).toBe(0);
+    } finally {
+      await pool.query(`ALTER TABLE pos_comprobantes_fiscales DROP CONSTRAINT test_reject_pendiente`);
+    }
+  });
+
+  it("el barrido recupera el envío diferido aunque no se haya creado ningún intento", async () => {
+    const sale = await ventaPendiente("deferred-sale");
+    expect(await getComprobanteByVentaId(sale.venta_id)).toMatchObject({ estado: "pendiente", intento_actual_id: null });
+    expect(fake.crearFacturaCalls).toBe(0);
+    expect(await barridoConciliacion()).toBe(0);
+    await barridoConciliacion({ minAgeMs: 0 });
+    await barridoConciliacion({ minAgeMs: 0 });
+    expect(await getComprobanteByVentaId(sale.venta_id)).toMatchObject({ estado: "emitido" });
+    expect(fake.authorizations).toBe(1);
+  });
+
+  it("no crea pendientes cuando ARCA está deshabilitado", async () => {
+    const config = getArcaConfig();
+    setArcaConfigForTests(null);
+    try {
+      const sale = await ventaPendiente("no-fiscal");
+      expect(await getComprobanteByVentaId(sale.venta_id)).toBeNull();
+      expect(await barridoConciliacion({ minAgeMs: 0 })).toBe(0);
+      expect(fake.crearFacturaCalls).toBe(0);
+    } finally {
+      setArcaConfigForTests(config);
+    }
+  });
 
   it("respuesta perdida se concilia con el mismo número y una autorización", async () => {
     await seedSku("sku-lost", 100);
@@ -239,9 +350,9 @@ describe.skipIf(!enabled)("recuperación fiscal", () => {
       expect(results).toHaveLength(10);
       const ventas = await pool.query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM pos_ventas`);
       expect(ventas.rows[0].n).toBe(10);
-      const errores = results.filter((result) => result.fiscal?.estado === "error");
-      expect(errores.length).toBeGreaterThan(0);
-      expect(errores.every((result) => !result.fiscal?.cae)).toBe(true);
+      const pendientes = results.filter((result) => result.fiscal?.estado === "pendiente");
+      expect(pendientes.length).toBeGreaterThan(0);
+      expect(pendientes.every((result) => !result.fiscal?.cae)).toBe(true);
     } finally {
       pool.options.max = prevMax ?? 20;
       pool.options.connectionTimeoutMillis = prevTimeout ?? 5_000;

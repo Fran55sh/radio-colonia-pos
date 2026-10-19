@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setArcaConfigForTests } from "../../config/arca.js";
 import { pool } from "../../config/db.js";
-import { marcarComprobanteError } from "../fiscal/repository.js";
+import { listarPendientesFiscales, marcarComprobanteError } from "../fiscal/repository.js";
+import { barridoConciliacion } from "../fiscal/conciliacion.js";
 import { setArcaClientForTests } from "../fiscal/arca-client.js";
 import { FakeArca } from "../fiscal/fake-arca.js";
 import { processOfflineBatch, processSale, setPostCommitFaultForTests } from "./service.js";
@@ -116,7 +117,7 @@ describe.skipIf(!enabled)("guardas fiscales de la venta", () => {
       lineas: [{ codigo_interno: "sku-dead", cantidad: 1 }],
       caja_sesion_id: cajaId,
     });
-    expect(result.fiscal?.estado).toBe("error");
+    expect(result.fiscal?.estado).toBe("pendiente");
     expect(result.fiscal?.cae).toBeNull();
     const ventas = await pool.query(`SELECT id FROM pos_ventas`);
     const stock = await pool.query<{ stock: number }>(
@@ -124,6 +125,20 @@ describe.skipIf(!enabled)("guardas fiscales de la venta", () => {
     );
     expect(ventas.rowCount).toBe(1);
     expect(stock.rows[0].stock).toBe(2);
+    expect(await listarPendientesFiscales()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ venta_id: result.venta_id, estado: "pendiente" })]),
+    );
+    expect(fake.crearFacturaCalls).toBe(0);
+
+    setPostCommitFaultForTests(null);
+    await barridoConciliacion({ minAgeMs: 0 });
+    await barridoConciliacion({ minAgeMs: 0 });
+    const recuperado = await pool.query(`SELECT estado, cae FROM pos_comprobantes_fiscales WHERE venta_id = $1`, [result.venta_id]);
+    expect(recuperado.rows[0]).toMatchObject({ estado: "emitido", cae: expect.any(String) });
+    expect(fake.authorizations).toBe(1);
+    expect((await pool.query(`SELECT id FROM pos_ventas`)).rowCount).toBe(1);
+    expect((await pool.query(`SELECT id FROM pos_caja_movimientos WHERE source_id = $1`, [String(result.venta_id)])).rowCount).toBe(1);
+    expect((await pool.query(`SELECT stock FROM product_variants WHERE sku = 'sku-dead'`)).rows[0].stock).toBe(2);
   });
 
   it("marcarComprobanteError no pisa una fila con CAE", async () => {
@@ -156,9 +171,8 @@ describe.skipIf(!enabled)("guardas fiscales de la venta", () => {
       { skipFiscal: true },
     );
     await pool.query(
-      `INSERT INTO pos_comprobantes_fiscales (
-         venta_id, estado, ambiente, emisor_cuit, punto_venta, cbte_tipo, cbte_nro, cae
-       ) VALUES ($1, 'emitido', 'dev', '20111111112', 1, 6, 3, '999')`,
+      `UPDATE pos_comprobantes_fiscales SET estado = 'emitido', cbte_nro = 3, cae = '999'
+       WHERE venta_id = $1`,
       [first.venta_id],
     );
     fake.reset();
