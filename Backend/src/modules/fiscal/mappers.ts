@@ -92,7 +92,7 @@ export function formatComprobanteNumero(
 }
 
 export function buildQrUrl(
-  _arca: Arca,
+  _arca: unknown,
   params: {
     fecha: string;
     cuit: number;
