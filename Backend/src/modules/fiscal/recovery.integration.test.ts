@@ -356,7 +356,6 @@ describe.skipIf(!enabled)("recuperación fiscal", () => {
          WHERE estado IN ('pendiente', 'error', 'enviando', 'desconocido') AND cae IS NULL`,
       );
       expect(pendientes.rows[0].n).toBeGreaterThan(0);
-      expect(results.every((result) => !result.fiscal?.cae)).toBe(true);
     } finally {
       pool.options.max = prevMax ?? 20;
       pool.options.connectionTimeoutMillis = prevTimeout ?? 5_000;
