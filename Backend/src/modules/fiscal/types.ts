@@ -1,4 +1,11 @@
-export type FiscalEstado = "pendiente" | "emitido" | "error" | "anulado";
+export type FiscalEstado =
+  | "pendiente"
+  | "enviando"
+  | "desconocido"
+  | "emitido"
+  | "rechazado"
+  | "error"
+  | "anulado";
 
 export type ClienteFiscal = {
   id: number;
@@ -10,6 +17,9 @@ export type ClienteFiscal = {
 };
 
 export type LineaFiscal = {
+  orden: number;
+  cantidad: number;
+  precio_unitario: number;
   neto_linea: number;
   iva_linea: number;
   exento_linea: number;
@@ -39,4 +49,12 @@ export type ComprobanteFiscalResponse = {
   qr_url: string | null;
   error_message: string | null;
   ambiente: string;
+  puede_reintentar: boolean;
+  requiere_conciliacion: boolean;
+  imp_total_enviado: number | null;
+  intento: {
+    nro_intento: number;
+    estado: string;
+    cbte_nro: number | null;
+  } | null;
 };

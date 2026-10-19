@@ -1,8 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { getArcaConfig, getArcaDiagnostics, isArcaConfigured } from "../../config/arca.js";
+import { env } from "../../config/env.js";
 import { AppError } from "../../middleware/errors.js";
 import { getArcaClient } from "./arca-client.js";
 import { getFiscalStatus, reintentarComprobante } from "./service.js";
+import { listarPendientesFiscales } from "./repository.js";
 
 export async function fiscalRoutes(app: FastifyInstance) {
   app.get("/ventas/:ventaId", async (request, reply) => {
@@ -15,6 +17,11 @@ export async function fiscalRoutes(app: FastifyInstance) {
       });
     }
     return reply.send({ fiscal });
+  });
+
+  app.get("/pendientes", async (_request, reply) => {
+    const pendientes = await listarPendientesFiscales();
+    return reply.send({ pendientes });
   });
 
   app.post("/ventas/:ventaId/reintentar", async (request, reply) => {
@@ -52,6 +59,11 @@ export async function fiscalRoutes(app: FastifyInstance) {
       arca_enabled: config !== null,
       production: config ? config.production : null,
       ambiente: config ? config.ambiente : null,
+      request_timeout_ms: env.ARCA_REQUEST_TIMEOUT_MS,
+      retries: env.ARCA_RETRIES,
+      emision_budget_ms: env.FISCAL_EMISION_BUDGET_MS,
+      lock_timeout_ms: env.FISCAL_LOCK_TIMEOUT_MS,
+      conciliacion_interval_ms: env.FISCAL_CONCILIACION_INTERVAL_MS,
       ...diagnostics,
     });
   });

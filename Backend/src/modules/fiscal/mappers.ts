@@ -1,6 +1,9 @@
-import { Arca, CbteTipo, DocTipo, IvaTipo } from "@ramiidv/arca-facturacion";
+import { Arca, CbteTipo, DocTipo, IvaTipo, type FECAESolicitarResult, type InvoiceDetail } from "@ramiidv/arca-facturacion";
 import { AppError } from "../../middleware/errors.js";
-import type { LineaFiscal } from "./types.js";
+import {
+  moneyFromCents,
+  type ImportesVenta,
+} from "../../lib/fiscal-importes.js";
 
 const ALICUOTA_MAP: Record<number, IvaTipo> = {
   21: IvaTipo.IVA_21,
@@ -23,40 +26,76 @@ export function mapAlicuotaToIvaTipo(alicuota: number): IvaTipo {
   return tipo;
 }
 
-export type ArcaFacturaItem = {
-  neto: number;
-  iva?: IvaTipo;
-  exento?: boolean;
+export type ParsedFECAE = {
+  aprobada: boolean;
+  resultado: "A" | "R";
+  cae?: string;
+  caeVencimiento?: string;
+  cbteNro: number;
+  observaciones: Array<{ code: number; msg: string }>;
 };
 
-/** Agrupa líneas POS por alícuota para minimizar ítems enviados a ARCA. */
-export function lineasToArcaItems(lineas: LineaFiscal[]): ArcaFacturaItem[] {
-  const gravado = new Map<number, number>();
-  let exentoTotal = 0;
+export function buildFECAEDetRequest(input: {
+  cbteNro: number;
+  cbteFch: string;
+  docTipo: number;
+  docNro: number;
+  condicionIva: number;
+  importes: ImportesVenta;
+}): InvoiceDetail {
+  const iva = input.importes.grupos
+    .filter((grupo) => grupo.alicuota > 0 && (grupo.neto_cents > 0 || grupo.iva_cents > 0))
+    .map((grupo) => ({
+      Id: mapAlicuotaToIvaTipo(grupo.alicuota),
+      BaseImp: moneyFromCents(grupo.neto_cents),
+      Importe: moneyFromCents(grupo.iva_cents),
+    }));
 
-  for (const l of lineas) {
-    if (l.exento_linea > 0) {
-      exentoTotal += l.exento_linea;
-      continue;
-    }
-    if (l.neto_linea <= 0 && l.iva_linea <= 0) continue;
-    const prev = gravado.get(l.alicuota_iva) ?? 0;
-    gravado.set(l.alicuota_iva, prev + l.neto_linea);
-  }
+  const detail: InvoiceDetail = {
+    Concepto: 1,
+    DocTipo: input.docTipo,
+    DocNro: input.docNro,
+    CbteDesde: input.cbteNro,
+    CbteHasta: input.cbteNro,
+    CbteFch: input.cbteFch,
+    ImpTotal: moneyFromCents(input.importes.total_cents),
+    ImpTotConc: moneyFromCents(input.importes.imp_tot_conc_cents),
+    ImpNeto: moneyFromCents(input.importes.neto_cents),
+    ImpOpEx: moneyFromCents(input.importes.exento_cents),
+    ImpTrib: 0,
+    ImpIVA: moneyFromCents(input.importes.iva_cents),
+    MonId: "PES",
+    MonCotiz: 1,
+    CondicionIVAReceptorId: input.condicionIva,
+  };
+  if (iva.length > 0) detail.Iva = iva;
+  return detail;
+}
 
-  const items: ArcaFacturaItem[] = [];
-  for (const [alicuota, neto] of gravado) {
-    if (neto > 0) {
-      items.push({ neto, iva: mapAlicuotaToIvaTipo(alicuota) });
+export function parseFECAESolicitar(result: FECAESolicitarResult): ParsedFECAE {
+  const raw = result.FeDetResp?.FECAEDetResponse;
+  const det = Array.isArray(raw) ? raw[0] : raw;
+  if (!det) {
+    return { aprobada: false, resultado: "R", cbteNro: 0, observaciones: [] };
+  }
+  const observaciones: Array<{ code: number; msg: string }> = [];
+  if (det.Observaciones) {
+    const obs = Array.isArray(det.Observaciones.Obs)
+      ? det.Observaciones.Obs
+      : [det.Observaciones.Obs];
+    for (const item of obs) {
+      if (item) observaciones.push({ code: item.Code, msg: item.Msg });
     }
   }
-  if (exentoTotal > 0) {
-    items.push({ neto: exentoTotal, exento: true });
-  }
-  if (items.length === 0) {
-    throw new AppError(400, "VENTA_SIN_IMPORTES", "La venta no tiene importes facturables");
-  }
-  return items;
+  const aprobada = det.Resultado === "A" && Boolean(det.CAE);
+  return {
+    aprobada,
+    resultado: det.Resultado === "A" ? "A" : "R",
+    cae: aprobada ? det.CAE : undefined,
+    caeVencimiento: aprobada ? det.CAEFchVto : undefined,
+    cbteNro: Number(det.CbteDesde),
+    observaciones,
+  };
 }
 
 export function cbteTipoLabel(cbteTipo: number): string {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,11 +31,32 @@ export function FiscalResultDialog({
 }: Props) {
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const shown = fiscal?.cae ? { ...fiscal, estado: "emitido" as const } : fiscal;
+  const canVerify = !!shown && !shown.cae && (shown.estado === "enviando" || shown.estado === "desconocido");
 
-  if (!fiscal) return null;
+  useEffect(() => {
+    if (!open || !canVerify) return;
+    let ticks = 0;
+    const timer = setInterval(() => {
+      ticks += 1;
+      if (ticks > 12) {
+        clearInterval(timer);
+        return;
+      }
+      void retryFiscal(ventaId)
+        .then((res) => {
+          if (res.fiscal) onFiscalUpdated?.(res.fiscal);
+        })
+        .catch(() => undefined);
+    }, 5_000);
+    return () => clearInterval(timer);
+  }, [open, canVerify, ventaId, onFiscalUpdated]);
 
-  const ok = fiscal.estado === "emitido" && !!fiscal.cae;
-  const canRetry = fiscal.estado === "error" || fiscal.estado === "pendiente";
+  if (!fiscal || !shown) return null;
+
+  const ok = shown.estado === "emitido" && !!shown.cae;
+  const canRetry = !shown.cae && (shown.estado === "error" || shown.estado === "rechazado");
+  const canEmit = !shown.cae && shown.estado === "pendiente";
 
   async function handleRetry() {
     setRetrying(true);
@@ -81,8 +102,13 @@ export function FiscalResultDialog({
               Emisión fiscal pendiente (offline o ARCA no disponible).
             </p>
           )}
-          {fiscal.estado === "error" && fiscal.error_message && (
-            <p className="text-destructive text-xs">{fiscal.error_message}</p>
+          {(shown.estado === "error" || shown.estado === "rechazado") && shown.error_message && (
+            <p className="text-destructive text-xs">{shown.error_message}</p>
+          )}
+          {canVerify && (
+            <p className="text-silver text-xs" aria-live="polite">
+              Verificando con ARCA…
+            </p>
           )}
           {retryError && <p className="text-destructive text-xs">{retryError}</p>}
           {fiscal.qr_url && (
@@ -98,13 +124,14 @@ export function FiscalResultDialog({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">
-          {canRetry && (
+          {(canRetry || canVerify || canEmit) && (
             <Button
               variant="outline"
               disabled={retrying}
+              aria-busy={retrying}
               onClick={() => void handleRetry()}
             >
-              {retrying ? "Reintentando…" : "Reintentar"}
+              {retrying ? "Consultando…" : canVerify ? "Verificar" : canEmit ? "Emitir" : "Reintentar"}
             </Button>
           )}
           <Button onClick={() => onOpenChange(false)}>Cerrar</Button>

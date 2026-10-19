@@ -12,8 +12,6 @@ const {
   getArcaConfig,
   isArcaConfigured,
   resolverComprobante,
-  lineasToArcaItems,
-  buildQrUrl,
 } = vi.hoisted(() => ({
   getComprobanteByVentaId: vi.fn(),
   loadVentaFiscalContext: vi.fn(),
@@ -26,8 +24,6 @@ const {
   getArcaConfig: vi.fn(),
   isArcaConfigured: vi.fn(),
   resolverComprobante: vi.fn(),
-  lineasToArcaItems: vi.fn(),
-  buildQrUrl: vi.fn(() => "https://qr.example/test"),
 }));
 
 vi.mock("./repository.js", () => ({
@@ -54,15 +50,34 @@ vi.mock("./resolver.js", () => ({
   resolverComprobante,
 }));
 
-vi.mock("./mappers.js", () => ({
-  lineasToArcaItems,
-  buildQrUrl,
-  formatComprobanteNumero: vi.fn(),
-  cbteTipoLabel: vi.fn(),
-  mapAlicuotaToIvaTipo: vi.fn(),
-}));
-
 import { emitirComprobanteVenta, maybeEmitirDespuesDeVenta } from "./service.js";
+
+function caeResponse(cae: string, nro: number) {
+  return {
+    FeCabResp: {
+      Cuit: 20111111112,
+      PtoVta: 1,
+      CbteTipo: 6,
+      FchProceso: "20261017",
+      CantReg: 1,
+      Resultado: "A" as const,
+      Reproceso: "N",
+    },
+    FeDetResp: {
+      FECAEDetResponse: {
+        Concepto: 1,
+        DocTipo: 99,
+        DocNro: 0,
+        CbteDesde: nro,
+        CbteHasta: nro,
+        CbteFch: "20261017",
+        Resultado: "A" as const,
+        CAE: cae,
+        CAEFchVto: "20261231",
+      },
+    },
+  };
+}
 
 describe("emitirComprobanteVenta idempotency", () => {
   beforeEach(() => {
@@ -85,7 +100,15 @@ describe("emitirComprobanteVenta idempotency", () => {
       iva_total: 21,
       exento: 0,
       total: 121,
-      lineas: [{ neto_linea: 100, iva_linea: 21, exento_linea: 0, alicuota_iva: 21 }],
+      lineas: [{
+        orden: 0,
+        cantidad: 1,
+        precio_unitario: 121,
+        neto_linea: 100,
+        iva_linea: 21,
+        exento_linea: 0,
+        alicuota_iva: 21,
+      }],
       cliente: null,
     });
     resolverComprobante.mockReturnValue({
@@ -95,7 +118,6 @@ describe("emitirComprobanteVenta idempotency", () => {
       condicionIva: 5,
       label: "Factura B",
     });
-    lineasToArcaItems.mockReturnValue([{ neto: 100, iva: 5 }]);
   });
 
   it("does not call WSFE when already emitido with CAE", async () => {
@@ -107,16 +129,17 @@ describe("emitirComprobanteVenta idempotency", () => {
     getComprobanteByVentaId.mockResolvedValue(existing);
     rowToFiscalResponse.mockReturnValue({ estado: "emitido", cae: existing.cae });
 
-    const facturar = vi.fn();
-    getArcaClient.mockReturnValue({ facturar });
+    const crearFactura = vi.fn();
+    const ultimoComprobante = vi.fn();
+    getArcaClient.mockReturnValue({ crearFactura, ultimoComprobante });
 
     const result = await emitirComprobanteVenta(10);
     expect(result).toMatchObject({ estado: "emitido", cae: "12345678901234" });
-    expect(facturar).not.toHaveBeenCalled();
+    expect(crearFactura).not.toHaveBeenCalled();
     expect(withVentaFiscalLock).toHaveBeenCalledWith(10, expect.any(Function));
   });
 
-  it("calls facturar when pendiente", async () => {
+  it("pide CAE con importes explícitos cuando está pendiente", async () => {
     getComprobanteByVentaId
       .mockResolvedValueOnce({ estado: "pendiente", cae: null })
       .mockResolvedValue({
@@ -126,17 +149,20 @@ describe("emitirComprobanteVenta idempotency", () => {
         ambiente: "dev",
       });
     ensureComprobantePendiente.mockResolvedValue({ estado: "pendiente" });
-    const facturar = vi.fn().mockResolvedValue({
-      aprobada: true,
-      cae: "999",
-      cbteNro: 7,
-      caeVencimiento: "20261231",
-    });
-    getArcaClient.mockReturnValue({ facturar });
+    const crearFactura = vi.fn().mockResolvedValue(caeResponse("999", 7));
+    const ultimoComprobante = vi.fn().mockResolvedValue(6);
+    getArcaClient.mockReturnValue({ crearFactura, ultimoComprobante });
     rowToFiscalResponse.mockImplementation((row: { estado: string; cae: string }) => row);
 
     await emitirComprobanteVenta(10);
-    expect(facturar).toHaveBeenCalledOnce();
+    expect(crearFactura).toHaveBeenCalledOnce();
+    expect(crearFactura.mock.calls[0][0].invoices[0]).toMatchObject({
+      CbteDesde: 7,
+      ImpTotal: 121,
+      ImpNeto: 100,
+      ImpIVA: 21,
+      Iva: [{ Id: 5, BaseImp: 100, Importe: 21 }],
+    });
     expect(marcarComprobanteEmitido).toHaveBeenCalled();
   });
 
@@ -148,7 +174,6 @@ describe("emitirComprobanteVenta idempotency", () => {
       condicionIva: 6,
       label: "Factura A — Monotributo",
     });
-    lineasToArcaItems.mockReturnValue([{ neto: 100, iva: 5 }]);
     getComprobanteByVentaId
       .mockResolvedValueOnce({ estado: "pendiente", cae: null })
       .mockResolvedValue({
@@ -158,26 +183,99 @@ describe("emitirComprobanteVenta idempotency", () => {
         ambiente: "dev",
       });
     ensureComprobantePendiente.mockResolvedValue({ estado: "pendiente" });
-    const facturar = vi.fn().mockResolvedValue({
-      aprobada: true,
-      cae: "111",
-      cbteNro: 3,
-      caeVencimiento: "20261231",
-    });
-    getArcaClient.mockReturnValue({ facturar });
+    const crearFactura = vi.fn().mockResolvedValue(caeResponse("111", 1));
+    const ultimoComprobante = vi.fn().mockResolvedValue(0);
+    getArcaClient.mockReturnValue({ crearFactura, ultimoComprobante });
     rowToFiscalResponse.mockImplementation((row: { estado: string; cae: string }) => row);
 
     await emitirComprobanteVenta(10);
 
-    expect(facturar).toHaveBeenCalledWith(
+    expect(crearFactura).toHaveBeenCalledWith(
       expect.objectContaining({
-        cbteTipo: 1,
-        docTipo: 80,
-        docNro: 20123456786,
-        condicionIva: 6,
-        items: [{ neto: 100, iva: 5 }],
+        CbteTipo: 1,
+        invoices: [
+          expect.objectContaining({
+            DocTipo: 80,
+            DocNro: 20123456786,
+            CondicionIVAReceptorId: 6,
+            ImpNeto: 100,
+            ImpIVA: 21,
+            Iva: [{ Id: 5, BaseImp: 100, Importe: 21 }],
+          }),
+        ],
       }),
     );
+  });
+
+  it("trata como emitido un comprobante con CAE aunque el estado sea error", async () => {
+    getComprobanteByVentaId.mockResolvedValue({
+      estado: "error",
+      cae: "555",
+      ambiente: "dev",
+    });
+    rowToFiscalResponse.mockReturnValue({ estado: "error", cae: "555" });
+    const crearFactura = vi.fn();
+    getArcaClient.mockReturnValue({ crearFactura });
+
+    const result = await emitirComprobanteVenta(10, { forceRetry: true });
+    expect(result).toMatchObject({ estado: "emitido", cae: "555" });
+    expect(crearFactura).not.toHaveBeenCalled();
+    expect(marcarComprobanteError).not.toHaveBeenCalled();
+  });
+
+  it("marca error si los importes no cierran con el total", async () => {
+    loadVentaFiscalContext.mockResolvedValue({
+      venta_id: 10,
+      cliente_id: null,
+      neto_gravado: 100,
+      iva_total: 21,
+      exento: 0,
+      total: 50,
+      lineas: [{
+        orden: 0,
+        cantidad: 1,
+        precio_unitario: 121,
+        neto_linea: 100,
+        iva_linea: 21,
+        exento_linea: 0,
+        alicuota_iva: 21,
+      }],
+      cliente: null,
+    });
+    getComprobanteByVentaId.mockResolvedValue({ estado: "pendiente", cae: null });
+    ensureComprobantePendiente.mockResolvedValue({ estado: "pendiente" });
+    const crearFactura = vi.fn();
+    getArcaClient.mockReturnValue({ crearFactura, ultimoComprobante: vi.fn() });
+    rowToFiscalResponse.mockReturnValue({ estado: "error", cae: null });
+
+    await emitirComprobanteVenta(10);
+    expect(crearFactura).not.toHaveBeenCalled();
+    expect(marcarComprobanteError).toHaveBeenCalledWith(
+      10,
+      "IMPORTES_INCONSISTENTES",
+      expect.any(String),
+      expect.any(Error),
+      undefined,
+    );
+  });
+
+  it("no marca error si la persistencia falla despues del CAE", async () => {
+    getComprobanteByVentaId.mockResolvedValue({ estado: "pendiente", cae: null, ambiente: "dev" });
+    ensureComprobantePendiente.mockResolvedValue({ estado: "pendiente" });
+    marcarComprobanteEmitido.mockRejectedValue(new Error("db caida"));
+    rowToFiscalResponse.mockImplementation((row: { estado?: string }) => row);
+    const crearFactura = vi.fn().mockResolvedValue(caeResponse("777", 4));
+    getArcaClient.mockReturnValue({
+      crearFactura,
+      ultimoComprobante: vi.fn().mockResolvedValue(3),
+    });
+
+    const result = await emitirComprobanteVenta(10);
+    expect(crearFactura).toHaveBeenCalledOnce();
+    expect(marcarComprobanteEmitido).toHaveBeenCalledTimes(3);
+    expect(marcarComprobanteError).not.toHaveBeenCalled();
+    expect(result?.estado).not.toBe("error");
+    expect(result?.cae ?? null).toBeNull();
   });
 
   it("maybeEmitirDespuesDeVenta skips when skipFiscal", async () => {
