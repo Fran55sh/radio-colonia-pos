@@ -9,7 +9,9 @@ import { buildFECAEDetRequest, buildQrUrl, parseFECAESolicitar } from "./mappers
 import { ArcaWSFEError, DocTipo } from "@ramiidv/arca-facturacion";
 import { resolverComprobante } from "./resolver.js";
 import {
+  anularVentaSinFactura,
   ensureComprobantePendiente,
+  FiscalLockBusy,
   getComprobanteByVentaId,
   loadVentaFiscalContext,
   marcarComprobanteEmitido,
@@ -321,6 +323,7 @@ async function ejecutarEmision(
     error_message: null,
     ambiente: arcaConfig.ambiente,
     puede_reintentar: false,
+    puede_eliminar: false,
     requiere_conciliacion: true,
     imp_total_enviado: impTotal,
     intento: null,
@@ -425,4 +428,24 @@ export async function reintentarComprobante(ventaId: number): Promise<Comprobant
     throw new AppError(503, "ARCA_DISABLED", "Facturación ARCA no está habilitada");
   }
   return emitirComprobanteVenta(ventaId, { forceRetry: true });
+}
+
+export async function eliminarVentaSinFactura(ventaId: number, actor: string): Promise<void> {
+  try {
+    await withVentaFiscalLock(ventaId, async (session) => {
+      if (!session) {
+        throw new AppError(500, "INTERNAL_ERROR", "No se pudo tomar la sesión fiscal");
+      }
+      await anularVentaSinFactura(session.client, ventaId, actor);
+    });
+  } catch (err) {
+    if (err instanceof FiscalLockBusy) {
+      throw new AppError(
+        409,
+        "FISCAL_LOCK_BUSY",
+        "La venta se está facturando. Esperá un momento y volvé a intentar",
+      );
+    }
+    throw err;
+  }
 }

@@ -50,6 +50,7 @@ export type ComprobanteFiscalResponse = {
   error_message: string | null;
   ambiente: string;
   puede_reintentar: boolean;
+  puede_eliminar: boolean;
   requiere_conciliacion: boolean;
   imp_total_enviado: number | null;
   intento: {

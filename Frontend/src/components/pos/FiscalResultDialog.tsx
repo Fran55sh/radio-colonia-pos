@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { retryFiscal, type FiscalResult } from "@/lib/api-client";
+import { deleteVentaSinFactura, retryFiscal, type FiscalResult } from "@/lib/api-client";
 
 type Props = {
   open: boolean;
@@ -18,6 +18,7 @@ type Props = {
   total: number;
   formatMoney: (n: number) => string;
   onFiscalUpdated?: (fiscal: FiscalResult) => void;
+  onDeleted?: () => void;
 };
 
 export function FiscalResultDialog({
@@ -28,8 +29,10 @@ export function FiscalResultDialog({
   total,
   formatMoney,
   onFiscalUpdated,
+  onDeleted,
 }: Props) {
   const [retrying, setRetrying] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const shown = fiscal?.cae ? { ...fiscal, estado: "emitido" as const } : fiscal;
   const canVerify = !!shown && !shown.cae && (shown.estado === "enviando" || shown.estado === "desconocido");
@@ -57,6 +60,7 @@ export function FiscalResultDialog({
   const ok = shown.estado === "emitido" && !!shown.cae;
   const canRetry = !shown.cae && (shown.estado === "error" || shown.estado === "rechazado");
   const canEmit = !shown.cae && shown.estado === "pendiente";
+  const canDelete = shown.puede_eliminar ?? (canRetry || canEmit);
 
   async function handleRetry() {
     setRetrying(true);
@@ -70,6 +74,23 @@ export function FiscalResultDialog({
       setRetryError(err instanceof Error ? err.message : "No se pudo reintentar");
     } finally {
       setRetrying(false);
+    }
+  }
+
+  async function handleDelete() {
+    const okDelete = window.confirm(
+      `¿Eliminar la venta #${ventaId}? Se anula el cobro y se devuelve el stock. Esta venta no tiene factura de ARCA.`,
+    );
+    if (!okDelete) return;
+    setDeleting(true);
+    setRetryError(null);
+    try {
+      await deleteVentaSinFactura(ventaId);
+      onDeleted?.();
+    } catch (err) {
+      setRetryError(err instanceof Error ? err.message : "No se pudo eliminar la venta");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -124,17 +145,27 @@ export function FiscalResultDialog({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">
+          {canDelete && (
+            <Button
+              variant="outline"
+              className="border-destructive/50 text-destructive hover:bg-destructive/10"
+              disabled={retrying || deleting}
+              onClick={() => void handleDelete()}
+            >
+              {deleting ? "Eliminando…" : "Eliminar"}
+            </Button>
+          )}
           {(canRetry || canVerify || canEmit) && (
             <Button
               variant="outline"
-              disabled={retrying}
+              disabled={retrying || deleting}
               aria-busy={retrying}
               onClick={() => void handleRetry()}
             >
               {retrying ? "Consultando…" : canVerify ? "Verificar" : canEmit ? "Emitir" : "Reintentar"}
             </Button>
           )}
-          <Button onClick={() => onOpenChange(false)}>Cerrar</Button>
+          <Button disabled={deleting} onClick={() => onOpenChange(false)}>Cerrar</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

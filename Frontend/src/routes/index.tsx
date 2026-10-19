@@ -1316,6 +1316,12 @@ function POS() {
         total={lastSaleTotal}
         formatMoney={formatARS}
         onFiscalUpdated={setLastFiscal}
+        onDeleted={() => {
+          setFiscalDialogOpen(false);
+          setLastFiscal(null);
+          void queryClient.invalidateQueries({ queryKey: ["fiscal-pendientes"] });
+          void queryClient.invalidateQueries({ queryKey: ["pos-productos"] });
+        }}
       />
 
       <OpenRegisterDialog

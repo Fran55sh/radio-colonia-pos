@@ -50,6 +50,7 @@ export type FiscalResult = {
   error_message: string | null;
   ambiente: string;
   puede_reintentar?: boolean;
+  puede_eliminar?: boolean;
   requiere_conciliacion?: boolean;
   imp_total_enviado?: number | null;
 };
@@ -269,6 +270,13 @@ export async function createVenta(payload: CreateSalePayload): Promise<CreateSal
 
 export async function retryFiscal(ventaId: number): Promise<{ fiscal: FiscalResult | null }> {
   return apiFetch<{ fiscal: FiscalResult | null }>(`/fiscal/ventas/${ventaId}/reintentar`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function deleteVentaSinFactura(ventaId: number): Promise<{ ok: boolean; venta_id: number }> {
+  return apiFetch<{ ok: boolean; venta_id: number }>(`/fiscal/ventas/${ventaId}/eliminar`, {
     method: "POST",
     body: JSON.stringify({}),
   });

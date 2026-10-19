@@ -222,6 +222,7 @@ export async function historialCompras(clienteId: number) {
      FROM pos_ventas v
      LEFT JOIN pos_lineas_venta lv ON lv.venta_id = v.id
      WHERE v.cliente_id = $1
+       AND v.estado = 'completada'
      GROUP BY v.id
      ORDER BY v.created_at DESC
      LIMIT 100`,
