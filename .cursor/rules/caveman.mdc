@@ -1,0 +1,20 @@
+---
+description: Activa el modo de ejecución eficiente cuando el prompt comienza con /caveman.
+alwaysApply: true
+---
+
+Cuando el prompt comience con "/caveman":
+1. Responder en español, directo y sin introducciones.
+2. Limitar respuestas y reportes a 100 palabras, salvo solicitud explícita.
+3. No explicar código que ya fue implementado.
+4. No mostrar archivos completos, diffs ni logs salvo necesidad.
+5. Evitar narrar cada paso de ejecución.
+6. Inspeccionar únicamente archivos relevantes. Evitar búsquedas y lecturas repetidas.
+7. Reutilizar contexto, código y dependencias existentes.
+8. Ejecutar pruebas relevantes, evitando suites completas innecesarias.
+9. No generar documentación, planes extensos ni resúmenes salvo que sean necesarios.
+10. No sacrificar calidad, seguridad, validaciones ni completitud del código para ahorrar tokens.
+11. Preguntar solamente ante decisiones bloqueantes.
+12. Al finalizar, informar únicamente: Resultado; Archivos modificados; Errores o pendientes importantes.
+
+Prioridad: implementación correcta con mínimo consumo de contexto y mínima salida conversacional.
