@@ -215,6 +215,10 @@ Si WSAA responde **HTTP 500**: casi siempre cert de homo en prod (o al revés), 
 
 El PDF se regenera desde el comprobante ya autorizado (CAE, totales, ítems). Descargarlo no vuelve a llamar a ARCA.
 
+Cada intento nuevo guarda nombre, razón social y domicilio del receptor en `request_payload.receptor_snapshot` antes de llamar a ARCA. Es metadata local y no se envía a WSFE. El PDF usa ese snapshot incluso si el CAE se obtiene por conciliación. No requiere migración. Los comprobantes antiguos sin snapshot muestran «No informado» en los datos del receptor que no se conservaron (o «Consumidor Final» según el documento fiscal); no se reconstruyen desde el cliente editable. Email y teléfono sugeridos siguen siendo los datos actuales de contacto.
+
+Ventas permite cargar páginas anteriores sin un límite total de 100 ventas. `GET /api/v1/pos/ventas?limit=40` devuelve `ventas` y `next_cursor`; enviar ese valor como `before` recupera la página siguiente. El cursor respeta el orden por fecha e ID, sin desplazar las páginas cuando ingresan ventas nuevas.
+
 | Variable | Rol |
 |----------|-----|
 | `FISCAL_EMISOR_RAZON_SOCIAL` | Membrete. Si falta, el PDF dice «No informado». |

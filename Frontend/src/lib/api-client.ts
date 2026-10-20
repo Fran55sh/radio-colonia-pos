@@ -337,8 +337,12 @@ export type VentaDetalle = {
   pdf_disponible: boolean;
 };
 
-export async function fetchVentas(limit = 40): Promise<{ ventas: VentaResumen[] }> {
-  return apiFetch(`/pos/ventas?limit=${limit}`);
+export async function fetchVentas(
+  limit = 40,
+  before: number | null = null,
+): Promise<{ ventas: VentaResumen[]; next_cursor: number | null }> {
+  const cursor = before == null ? "" : `&before=${before}`;
+  return apiFetch(`/pos/ventas?limit=${limit}${cursor}`);
 }
 
 export async function fetchVentaDetalle(ventaId: number): Promise<VentaDetalle> {

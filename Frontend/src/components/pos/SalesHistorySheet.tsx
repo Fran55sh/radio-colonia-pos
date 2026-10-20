@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -25,9 +25,11 @@ function fecha(iso: string): string {
 
 export function SalesHistorySheet({ open, onOpenChange }: Props) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const list = useQuery({
+  const list = useInfiniteQuery({
     queryKey: ["pos-ventas"],
-    queryFn: () => fetchVentas(),
+    initialPageParam: null as number | null,
+    queryFn: ({ pageParam }) => fetchVentas(40, pageParam),
+    getNextPageParam: (page) => page.next_cursor,
     enabled: open,
   });
   const detail = useQuery({
@@ -57,19 +59,37 @@ export function SalesHistorySheet({ open, onOpenChange }: Props) {
         </SheetHeader>
 
         {selectedId == null ? (
-          <Lista
-            loading={list.isLoading}
-            error={
-              list.isError
-                ? list.error instanceof Error
-                  ? list.error.message
-                  : "No se pudieron cargar las ventas"
-                : null
-            }
-            ventas={list.data?.ventas ?? []}
-            onRetry={() => void list.refetch()}
-            onOpen={setSelectedId}
-          />
+          <>
+            <Lista
+              loading={list.isLoading}
+              error={
+                list.isError && !list.data
+                  ? list.error instanceof Error
+                    ? list.error.message
+                    : "No se pudieron cargar las ventas"
+                  : null
+              }
+              ventas={list.data?.pages.flatMap((page) => page.ventas) ?? []}
+              onRetry={() => void list.refetch()}
+              onOpen={setSelectedId}
+            />
+            {list.isFetchNextPageError && (
+              <p className="mt-3 text-sm text-destructive" role="alert">
+                No se pudieron cargar las ventas anteriores. Volvé a intentar.
+              </p>
+            )}
+            {list.hasNextPage && (
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-4 w-full border-border"
+                disabled={list.isFetching}
+                onClick={() => void list.fetchNextPage()}
+              >
+                {list.isFetchingNextPage ? "Cargando…" : "Cargar ventas anteriores"}
+              </Button>
+            )}
+          </>
         ) : (
           <div className="mt-4 space-y-3 text-sm">
             <Button

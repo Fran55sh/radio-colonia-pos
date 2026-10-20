@@ -70,7 +70,7 @@ export async function loadVentaFiscalContext(ventaId: number, db: Queryable = po
   let cliente: ClienteFiscal | null = null;
   if (v.cliente_id) {
     const cRes = await db.query<ClienteFiscal>(
-      `SELECT id, nombre, documento, documento_tipo_afip, condicion_iva_receptor_id, razon_social
+      `SELECT id, nombre, documento, documento_tipo_afip, condicion_iva_receptor_id, razon_social, domicilio_fiscal
        FROM pos_clientes WHERE id = $1`,
       [v.cliente_id],
     );

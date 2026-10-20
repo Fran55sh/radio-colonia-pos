@@ -24,7 +24,10 @@ function iso(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
-export async function listarVentas(limit: number): Promise<VentaListado[]> {
+export async function listarVentas(limit: number, before: number | null = null): Promise<{
+  ventas: VentaListado[];
+  next_cursor: number | null;
+}> {
   const { rows } = await pool.query<{
     id: number;
     created_at: Date;
@@ -45,11 +48,15 @@ export async function listarVentas(limit: number): Promise<VentaListado[]> {
      LEFT JOIN pos_clientes cl ON cl.id = v.cliente_id
      LEFT JOIN pos_comprobantes_fiscales c ON c.venta_id = v.id
      WHERE v.estado <> 'anulada'
+       AND ($2::int IS NULL OR (v.created_at, v.id) < (
+         SELECT created_at, id FROM pos_ventas WHERE id = $2
+       ))
      ORDER BY v.created_at DESC, v.id DESC
      LIMIT $1`,
-    [limit],
+    [limit + 1, before],
   );
-  return rows.map((row) => ({
+  const page = rows.slice(0, limit);
+  const ventas = page.map((row) => ({
     id: row.id,
     created_at: iso(row.created_at),
     total: money(row.total),
@@ -63,6 +70,7 @@ export async function listarVentas(limit: number): Promise<VentaListado[]> {
         : null,
     pdf_disponible: esComprobanteAutorizado(row.cae, row.fiscal_estado ?? ""),
   }));
+  return { ventas, next_cursor: rows.length > limit ? page[page.length - 1].id : null };
 }
 
 export async function detalleVenta(ventaId: number) {

@@ -24,9 +24,11 @@ type ComprobanteQuery = {
   imp_total_enviado: string | null;
   iva_detalle: unknown;
   medio_pago: string | null;
-  nombre: string | null;
-  razon_social: string | null;
-  domicilio_fiscal: string | null;
+  receptor_snapshot: {
+    nombre: string | null;
+    razon_social: string | null;
+    domicilio_fiscal: string | null;
+  } | null;
   email: string | null;
   telefono: string | null;
   request_payload: unknown;
@@ -91,7 +93,8 @@ export async function cargarFacturaPersistida(ventaId: number): Promise<FacturaP
             c.neto_gravado::text, c.iva_total::text, c.exento::text, c.total::text,
             c.imp_total_enviado::text, c.iva_detalle,
             v.medio_pago,
-            cl.nombre, cl.razon_social, cl.domicilio_fiscal, cl.email, cl.telefono,
+            i.request_payload->'receptor_snapshot' AS receptor_snapshot,
+            cl.email, cl.telefono,
             i.request_payload
      FROM pos_comprobantes_fiscales c
      JOIN pos_ventas v ON v.id = c.venta_id
@@ -124,12 +127,15 @@ export async function cargarFacturaPersistida(ventaId: number): Promise<FacturaP
 
   const payload = parsePayload(row.request_payload);
   const ivaDetalle = parseIvaDetalle(row.iva_detalle);
+  // Los comprobantes anteriores al snapshot no tienen una identidad histórica
+  // recuperable: no sustituirla por los datos editables del cliente actual.
+  const snapshot = row.receptor_snapshot;
   const receptor: ReceptorPersistido | null =
-    row.nombre || row.razon_social || row.domicilio_fiscal || row.email || row.telefono
+    snapshot || row.email || row.telefono
     ? {
-        nombre: row.nombre,
-        razonSocial: row.razon_social,
-        domicilio: row.domicilio_fiscal,
+        nombre: snapshot?.nombre ?? null,
+        razonSocial: snapshot?.razon_social ?? null,
+        domicilio: snapshot?.domicilio_fiscal ?? null,
         email: row.email,
         telefono: row.telefono,
       }

@@ -6,10 +6,14 @@ import { listProductosCaja, processOfflineBatch, processSale } from "./service.j
 
 export async function posRoutes(app: FastifyInstance) {
   app.get("/ventas", async (request, reply) => {
-    const query = request.query as { limit?: string };
+    const query = request.query as { limit?: string; before?: string };
     const parsed = Number(query.limit ?? 40);
     const limit = Number.isInteger(parsed) ? Math.min(100, Math.max(1, parsed)) : 40;
-    return reply.send({ ventas: await listarVentas(limit) });
+    const before = query.before == null ? null : Number(query.before);
+    if (before != null && (!Number.isSafeInteger(before) || before <= 0 || before > 2147483647)) {
+      return reply.status(400).send({ error: "VALIDATION_ERROR", message: "Cursor de ventas inválido" });
+    }
+    return reply.send(await listarVentas(limit, before));
   });
 
   app.get("/ventas/:ventaId", async (request, reply) => {

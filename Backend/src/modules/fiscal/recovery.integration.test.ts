@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setClockForTests } from "../../lib/fecha-ar.js";
 import { getArcaConfig, setArcaConfigForTests } from "../../config/arca.js";
 import { pool } from "../../config/db.js";
@@ -10,6 +10,8 @@ import { eliminarVentaSinFactura, reintentarComprobante, setPersistFailuresForTe
 import { applyPosSchema, closePool } from "../../../test/apply-pos-schema.js";
 import { processSale } from "../pos/service.js";
 import { getComprobanteByVentaId, listarPendientesFiscales, reservarIntento, resolverIntento } from "./repository.js";
+import { cargarFacturaPersistida } from "./factura-datos.js";
+import { pdfDeVenta } from "./factura-servicio.js";
 
 const enabled = Boolean(process.env.TEST_DATABASE_URL);
 
@@ -113,6 +115,52 @@ describe.skipIf(!enabled)("recuperación fiscal", () => {
       imp_iva: 17.36, imp_op_ex: 0, iva_detalle: [], request_payload: {},
     };
   }
+
+  it.each([false, true])("conserva el receptor aunque se edite el cliente (conciliación: %s)", async (conciliar) => {
+    const envio = vi.spyOn(fake, "crearFactura");
+    await seedSku("receptor-snapshot", 121);
+    const cliente = await pool.query<{ id: number }>(
+      `INSERT INTO pos_clientes (nombre, razon_social, documento, condicion_iva_receptor_id, domicilio_fiscal)
+       VALUES ('Ada', 'Ada SA', '20123456786', 1, 'Calle Original 123') RETURNING id`,
+    );
+    if (conciliar) setPersistFailuresForTests(3);
+    const sale = await processSale({
+      client_sale_id: `snapshot-${conciliar}`,
+      cliente_id: cliente.rows[0].id,
+      medio_pago: "Efectivo",
+      lineas: [{ codigo_interno: "receptor-snapshot", cantidad: 1 }],
+      caja_sesion_id: cajaId,
+    });
+    await pool.query(
+      `UPDATE pos_clientes SET nombre = 'Otra persona', razon_social = 'Otra SA',
+       domicilio_fiscal = 'Otra calle 456' WHERE id = $1`,
+      [cliente.rows[0].id],
+    );
+    if (conciliar) await barridoConciliacion({ minAgeMs: 0 });
+    const data = await cargarFacturaPersistida(sale.venta_id);
+    expect(data?.receptor).toMatchObject({
+      nombre: "Ada", razonSocial: "Ada SA", domicilio: "Calle Original 123",
+    });
+    expect(data?.cae).toMatch(/^\d{14}$/);
+    expect(envio.mock.calls[0][0].invoices[0]).not.toHaveProperty("receptor_snapshot");
+    envio.mockRestore();
+    const first = await pdfDeVenta(sale.venta_id);
+    expect(first.model.receptor.nombre).toBe("Ada SA");
+    expect(first.model.receptor.domicilio).toBe("Calle Original 123");
+    await pool.query(`UPDATE pos_clientes SET razon_social = NULL, domicilio_fiscal = NULL WHERE id = $1`, [cliente.rows[0].id]);
+    const second = await pdfDeVenta(sale.venta_id);
+    expect(second.buffer.equals(first.buffer)).toBe(true);
+
+    // Una factura antigua sin snapshot no debe heredar la identidad actual.
+    await pool.query(
+      `UPDATE pos_comprobantes_fiscales_intentos SET request_payload = request_payload - 'receptor_snapshot'
+       WHERE venta_id = $1`, [sale.venta_id],
+    );
+    expect((await cargarFacturaPersistida(sale.venta_id))?.receptor).toBeNull();
+    const legacy = await pdfDeVenta(sale.venta_id);
+    expect(legacy.model.receptor.nombre).toBe("No informado");
+    expect(legacy.model.receptor.domicilio).toBe("No informado");
+  });
 
   it("revierte el intento si falla la actualización del comprobante y permite reintentar", async () => {
     const sale = await ventaPendiente("atomic-reserva");
