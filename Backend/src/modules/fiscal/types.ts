@@ -14,6 +14,7 @@ export type ClienteFiscal = {
   documento_tipo_afip: string | null;
   condicion_iva_receptor_id: number | null;
   razon_social: string | null;
+  domicilio_fiscal?: string | null;
 };
 
 export type LineaFiscal = {

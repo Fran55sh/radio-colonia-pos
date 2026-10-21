@@ -229,7 +229,16 @@ async function ejecutarEmision(
         imp_iva: moneyFromCents(importes.iva_cents),
         imp_op_ex: moneyFromCents(importes.exento_cents),
         iva_detalle: detail.Iva ?? [],
-        request_payload: detail,
+        // Metadatos locales: se guardan antes del envío y no se mandan a WSFE.
+        // Permanecen unidos al intento, incluso si el CAE se recupera por conciliación.
+        request_payload: {
+          ...detail,
+          receptor_snapshot: ctx.cliente ? {
+            nombre: ctx.cliente.nombre,
+            razon_social: ctx.cliente.razon_social,
+            domicilio_fiscal: ctx.cliente.domicilio_fiscal ?? null,
+          } : null,
+        },
       });
       intentoId = reserved.id;
     }

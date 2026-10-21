@@ -209,4 +209,30 @@ Si WSAA responde **HTTP 500**: casi siempre cert de homo en prod (o al revés), 
 
 ### Roles
 
-`/api/v1/fiscal/*` requiere rol **caja** o superior.
+`/api/v1/fiscal/*` requiere rol **caja** o superior. El GET público `/api/v1/fiscal/publico/:token` no usa sesión: el token va firmado y vence.
+
+### PDF, email y WhatsApp
+
+El PDF se regenera desde el comprobante ya autorizado (CAE, totales, ítems). Descargarlo no vuelve a llamar a ARCA.
+
+Cada intento nuevo guarda nombre, razón social y domicilio del receptor en `request_payload.receptor_snapshot` antes de llamar a ARCA. Es metadata local y no se envía a WSFE. El PDF usa ese snapshot incluso si el CAE se obtiene por conciliación. No requiere migración. Los comprobantes antiguos sin snapshot muestran «No informado» en los datos del receptor que no se conservaron (o «Consumidor Final» según el documento fiscal); no se reconstruyen desde el cliente editable. Email y teléfono sugeridos siguen siendo los datos actuales de contacto.
+
+Ventas permite cargar páginas anteriores sin un límite total de 100 ventas. `GET /api/v1/pos/ventas?limit=40` devuelve `ventas` y `next_cursor`; enviar ese valor como `before` recupera la página siguiente. El cursor respeta el orden por fecha e ID, sin desplazar las páginas cuando ingresan ventas nuevas.
+
+| Variable | Rol |
+|----------|-----|
+| `FISCAL_EMISOR_RAZON_SOCIAL` | Membrete. Si falta, el PDF dice «No informado». |
+| `FISCAL_EMISOR_DOMICILIO` | Domicilio comercial del membrete. |
+| `FISCAL_EMISOR_CONDICION_IVA` | Default `IVA Responsable Inscripto`. Este emisor no emite Factura C. |
+| `FISCAL_EMISOR_INGRESOS_BRUTOS` | Número de ingresos brutos. |
+| `FISCAL_EMISOR_INICIO_ACTIVIDADES` | Fecha `AAAA-MM-DD` o texto. |
+| `INVOICE_SMTP_HOST` / `INVOICE_EMAIL_FROM` | Obligatorias para enviar el PDF. Sin ellas el botón responde que el correo no está configurado. |
+| `INVOICE_SMTP_PORT` | Default 587. |
+| `INVOICE_SMTP_SECURE` | `true` fuerza TLS. El puerto 465 también. |
+| `INVOICE_SMTP_USER` / `INVOICE_SMTP_PASS` | Auth SMTP. No se escriben en el log de envíos. |
+| `INVOICE_EMAIL_SUBJECT` / `INVOICE_EMAIL_BODY` | Plantillas con `{{numero}}`, `{{cae}}`, `{{letra}}`, `{{archivo}}`, `{{total}}`. |
+| `INVOICE_SHARE_SECRET` | Firma del enlace de WhatsApp. Si falta, se usa `POS_JWT_SECRET` (mín. 16). |
+| `INVOICE_SHARE_TTL_HOURS` | Vigencia del enlace. Default 72, tope 168. |
+| `PUBLIC_API_URL` | Base pública del API para armar el enlace. Si falta, se usa el host del request. |
+
+Pendiente de operación: no hay servidor de correo en el repo. Hasta cargar el SMTP, el envío queda deshabilitado y el resultado se anota en el log. La tabla `pos_comprobante_envios` es opcional; el SQL propuesto está en `docs/sql/0032_pos_comprobante_envios.sql` y hay que renumerarlo si el ecommerce ya pasó de `0031`. El POS arranca igual si la tabla no existe.

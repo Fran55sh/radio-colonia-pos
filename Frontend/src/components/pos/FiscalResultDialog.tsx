@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { deleteVentaSinFactura, retryFiscal, type FiscalResult } from "@/lib/api-client";
+import { FiscalPdfActions } from "./FiscalPdfActions";
 
 type Props = {
   open: boolean;
@@ -35,7 +36,8 @@ export function FiscalResultDialog({
   const [deleting, setDeleting] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const shown = fiscal?.cae ? { ...fiscal, estado: "emitido" as const } : fiscal;
-  const canVerify = !!shown && !shown.cae && (shown.estado === "enviando" || shown.estado === "desconocido");
+  const canVerify =
+    !!shown && !shown.cae && (shown.estado === "enviando" || shown.estado === "desconocido");
 
   useEffect(() => {
     if (!open || !canVerify) return;
@@ -115,9 +117,7 @@ export function FiscalResultDialog({
           <Row label="Tipo" value={fiscal.cbte_tipo_label} />
           {fiscal.comprobante && <Row label="Número" value={fiscal.comprobante} />}
           {fiscal.cae && <Row label="CAE" value={fiscal.cae} copyable />}
-          {fiscal.cae_vencimiento && (
-            <Row label="Vence" value={fiscal.cae_vencimiento} />
-          )}
+          {fiscal.cae_vencimiento && <Row label="Vence" value={fiscal.cae_vencimiento} />}
           {fiscal.estado === "pendiente" && (
             <p className="text-silver text-xs">
               Emisión fiscal pendiente (offline o ARCA no disponible).
@@ -132,6 +132,7 @@ export function FiscalResultDialog({
             </p>
           )}
           {retryError && <p className="text-destructive text-xs">{retryError}</p>}
+          {ok && <FiscalPdfActions ventaId={ventaId} />}
           {fiscal.qr_url && (
             <a
               href={fiscal.qr_url}
@@ -162,35 +163,31 @@ export function FiscalResultDialog({
               aria-busy={retrying}
               onClick={() => void handleRetry()}
             >
-              {retrying ? "Consultando…" : canVerify ? "Verificar" : canEmit ? "Emitir" : "Reintentar"}
+              {retrying
+                ? "Consultando…"
+                : canVerify
+                  ? "Verificar"
+                  : canEmit
+                    ? "Emitir"
+                    : "Reintentar"}
             </Button>
           )}
-          <Button disabled={deleting} onClick={() => onOpenChange(false)}>Cerrar</Button>
+          <Button disabled={deleting} onClick={() => onOpenChange(false)}>
+            Cerrar
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-function Row({
-  label,
-  value,
-  copyable,
-}: {
-  label: string;
-  value: string;
-  copyable?: boolean;
-}) {
+function Row({ label, value, copyable }: { label: string; value: string; copyable?: boolean }) {
   return (
     <div className="flex justify-between gap-4 items-start">
       <span className="text-silver text-xs uppercase tracking-wide shrink-0">{label}</span>
       <span
         className="text-silver-light text-right break-all"
-        onClick={
-          copyable
-            ? () => void navigator.clipboard?.writeText(value)
-            : undefined
-        }
+        onClick={copyable ? () => void navigator.clipboard?.writeText(value) : undefined}
         title={copyable ? "Copiar" : undefined}
       >
         {value}

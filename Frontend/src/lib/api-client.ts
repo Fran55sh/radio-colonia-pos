@@ -275,15 +275,130 @@ export async function retryFiscal(ventaId: number): Promise<{ fiscal: FiscalResu
   });
 }
 
-export async function deleteVentaSinFactura(ventaId: number): Promise<{ ok: boolean; venta_id: number }> {
+export async function deleteVentaSinFactura(
+  ventaId: number,
+): Promise<{ ok: boolean; venta_id: number }> {
   return apiFetch<{ ok: boolean; venta_id: number }>(`/fiscal/ventas/${ventaId}/eliminar`, {
     method: "POST",
     body: JSON.stringify({}),
   });
 }
 
-export async function fetchFiscalPendientes(): Promise<{ pendientes: Array<FiscalResult & { venta_id: number }> }> {
+export async function fetchFiscalPendientes(): Promise<{
+  pendientes: Array<FiscalResult & { venta_id: number }>;
+}> {
   return apiFetch(`/fiscal/pendientes`);
+}
+
+export type VentaResumen = {
+  id: number;
+  created_at: string;
+  total: number;
+  medio_pago: string;
+  estado: string;
+  cliente: string | null;
+  fiscal_estado: string | null;
+  comprobante: string | null;
+  pdf_disponible: boolean;
+};
+
+export type VentaDetalle = {
+  venta: {
+    id: number;
+    created_at: string;
+    total: number;
+    neto_gravado: number;
+    iva_total: number;
+    exento: number;
+    medio_pago: string;
+    estado: string;
+    cliente: {
+      id: number;
+      nombre: string | null;
+      razon_social: string | null;
+      documento: string | null;
+      domicilio_fiscal: string | null;
+      email: string | null;
+      telefono: string | null;
+      condicion_iva_receptor_id: number | null;
+    } | null;
+  };
+  lineas: Array<{
+    codigo: string;
+    descripcion: string;
+    cantidad: number;
+    precio_unitario: number;
+    alicuota_iva: number;
+    neto: number;
+    iva: number;
+    total: number;
+  }>;
+  fiscal: FiscalResult | null;
+  pdf_disponible: boolean;
+};
+
+export async function fetchVentas(
+  limit = 40,
+  before: number | null = null,
+): Promise<{ ventas: VentaResumen[]; next_cursor: number | null }> {
+  const cursor = before == null ? "" : `&before=${before}`;
+  return apiFetch(`/pos/ventas?limit=${limit}${cursor}`);
+}
+
+export async function fetchVentaDetalle(ventaId: number): Promise<VentaDetalle> {
+  return apiFetch(`/pos/ventas/${ventaId}`);
+}
+
+export async function fetchDistribucionFactura(ventaId: number): Promise<{
+  pdf_disponible: boolean;
+  archivo: string | null;
+  email_sugerido: string | null;
+  telefono: string | null;
+  email_configurado: boolean;
+  cae: string | null;
+}> {
+  return apiFetch(`/fiscal/ventas/${ventaId}/distribucion`);
+}
+
+export async function fetchFacturaPdf(ventaId: number): Promise<{ blob: Blob; filename: string }> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}/fiscal/ventas/${ventaId}/pdf`, { headers });
+  if (res.status === 401) {
+    handleUnauthorized();
+    throw new ApiError(401, "UNAUTHORIZED", "Sesión expirada o no autorizada");
+  }
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+    throw new ApiError(
+      res.status,
+      data.error ?? "HTTP_ERROR",
+      data.message ?? "No se pudo obtener el PDF",
+    );
+  }
+  const blob = await res.blob();
+  const match = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "");
+  return { blob, filename: match?.[1] ?? `Factura-${ventaId}.pdf` };
+}
+
+export async function enviarFacturaEmail(
+  ventaId: number,
+  body: { to: string; subject?: string; body?: string },
+): Promise<{ ok: true; destino: string }> {
+  return apiFetch(`/fiscal/ventas/${ventaId}/email`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function crearEnlaceFactura(
+  ventaId: number,
+): Promise<{ url: string; expires_at: string }> {
+  return apiFetch(`/fiscal/ventas/${ventaId}/enlace`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
 export async function syncOfflineVentas(ventas: CreateSalePayload[]): Promise<OfflineBatchResult> {

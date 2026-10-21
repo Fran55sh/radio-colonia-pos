@@ -384,3 +384,18 @@ BEGIN
     ON pos_iva_registro (referencia_tipo, referencia_id, alicuota)
     WHERE tipo = 'venta';
 END $$;
+
+-- Registro opcional de envíos de factura. La migración numerada vive en
+-- docs/sql/0032_pos_comprobante_envios.sql y debe coordinarse con el ecommerce.
+CREATE TABLE IF NOT EXISTS pos_comprobante_envios (
+  id          BIGSERIAL PRIMARY KEY,
+  venta_id    INTEGER NOT NULL REFERENCES pos_ventas (id) ON DELETE CASCADE,
+  canal       VARCHAR(16) NOT NULL CHECK (canal IN ('email', 'enlace')),
+  resultado   VARCHAR(16) NOT NULL CHECK (resultado IN ('enviado', 'error', 'generado')),
+  destino     VARCHAR(255),
+  detalle     TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pos_comprobante_envios_venta
+  ON pos_comprobante_envios (venta_id, created_at DESC);
